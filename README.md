@@ -1,5 +1,12 @@
 # Device Hub iOS
 
+> **About this fork.** This is [somas1](https://github.com/somas1)'s fork of
+> [JaviSoto/device-hub-ios](https://github.com/JaviSoto/device-hub-ios). It aims
+> to add Apple Vision Pro as a controller, alongside iPhone and iPad. Changes
+> arrive here gradually, one reviewed topic at a time, so this fork may lag
+> behind the private work it comes from. See [Credits](#credits) for everyone
+> whose work it builds on.
+
 ![Device Hub iOS running on iPad and controlling an iPhone](Docs/Images/device-hub-ipad.png)
 
 ![iOS and iPadOS 27.0+](https://img.shields.io/badge/iOS%20%26%20iPadOS-27.0%2B-000000?logo=apple&logoColor=white)
@@ -187,7 +194,7 @@ traffic in public issues.
 
 Device Hub is an unofficial project and is not affiliated with, endorsed by,
 sponsored by, or distributed by Apple Inc. Apple, Xcode, macOS, iOS, iPadOS,
-iPhone, and iPad are trademarks of Apple Inc.
+iPhone, iPad, Apple Vision Pro, and visionOS are trademarks of Apple Inc.
 
 Use Device Hub only with devices you own or are explicitly authorized to
 control. Private and undocumented interfaces are unsupported and may change
@@ -203,3 +210,20 @@ components remain subject to their own licenses and notices.
 
 Device Hub was built by **Codex**, powered by **GPT-5.6 Sol**, under
 [Javier Soto](https://github.com/JaviSoto)'s direction.
+
+This fork is maintained by [somas1](https://github.com/somas1), with help from
+AI coding agents including **Claude** (Anthropic) and **Codex** (OpenAI). It
+also builds on:
+
+- [Javier Soto](https://github.com/JaviSoto)'s original
+  [Device Hub iOS](https://github.com/JaviSoto/device-hub-ios), which this fork
+  follows and sends generic fixes back to.
+- [Jackson Coxson](https://github.com/jkcoxson) and the contributors to
+  [`idevice`](https://github.com/jkcoxson/idevice), the protocol stack that
+  makes talking to Apple devices possible.
+- [mh-mobile](https://github.com/mh-mobile)'s fork,
+  [device-hub-ios-agent](https://github.com/mh-mobile/device-hub-ios-agent),
+  whose reliability, audio and agent-control work this fork studies and may
+  adopt. Any commit taken from it keeps its original author.
+- The Point-Free libraries and other packages listed under
+  [Built on](#built-on).
