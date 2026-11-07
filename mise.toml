@@ -93,7 +93,7 @@ run = "swiftformat Packages Sources Tools --config .swiftformat --lint"
 [tasks."lint:swift"]
 description = "Lint Swift source"
 run = """
-SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-BuildSupport/shared}"
 "$SHARED_IOS_SUPPORT_DIR/scripts/lint-swift.sh" --project-config .swiftlint.yml
 """
 

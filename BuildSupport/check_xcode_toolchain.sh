@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 devicehub_check_xcode_toolchain() {
-  local shared_support="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+  local shared_support="${SHARED_IOS_SUPPORT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/shared}"
   local checker="$shared_support/scripts/check_xcode_toolchain.py"
   if [[ ! -r "$checker" ]]; then
     printf 'Missing shared Xcode toolchain check: %s\n' "$checker" >&2

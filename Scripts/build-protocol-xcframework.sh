@@ -22,7 +22,7 @@ readonly BUILD_ROOT="${DEVICE_HUB_PROTOCOL_TARGET_DIR:-$DERIVED_DATA_PATH/Rust/.
 readonly DEVICE_TARGET="aarch64-apple-ios"
 readonly SIMULATOR_TARGET="aarch64-apple-ios-sim"
 readonly RUST_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-1.95.0}"
-readonly SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+readonly SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$REPOSITORY_ROOT/BuildSupport/shared}"
 readonly LOGGED_RUNNER="$SHARED_IOS_SUPPORT_DIR/scripts/run_logged.py"
 
 if ! command -v rustup >/dev/null 2>&1; then

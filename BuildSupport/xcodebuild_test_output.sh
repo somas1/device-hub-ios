@@ -15,7 +15,7 @@ devicehub_run_xcodebuild() {
   local xcodebuild_action="$6"
   shift 6
 
-  local shared_support="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+  local shared_support="${SHARED_IOS_SUPPORT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/shared}"
   local logged_runner="$shared_support/scripts/run_logged.py"
   if [[ ! -r "$logged_runner" ]]; then
     printf 'Missing shared build logger: %s\n' "$logged_runner" >&2
