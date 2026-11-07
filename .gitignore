@@ -20,3 +20,4 @@ VisualReview/current/*
 Vendor/idevice/
 build/
 xcuserdata/
+.worktrees/
