@@ -332,7 +332,7 @@ class ReleasePathTests(unittest.TestCase):
         shell = "\n".join(
             (
                 "set -euo pipefail",
-                f"SHARED_IOS_SUPPORT_DIR={shlex.quote('/Users/javi/code/ios-build-support')}",
+                f"SHARED_IOS_SUPPORT_DIR={shlex.quote(str(ROOT / 'BuildSupport/shared'))}",
                 match.group(),
                 "set +e",
                 "run_xcodebuild "
