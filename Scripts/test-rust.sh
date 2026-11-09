@@ -10,7 +10,7 @@ readonly PROCESS_GUARD="$REPOSITORY_ROOT/BuildSupport/process_guard.sh"
 source "$PROCESS_GUARD"
 devicehub_require_guard test-rust 1800 "$0" "$@"
 
-readonly SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+readonly SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$REPOSITORY_ROOT/BuildSupport/shared}"
 readonly DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$HOME/Library/Developer/Xcode/DerivedData/DeviceHub}"
 readonly LOGGED_RUNNER="$SHARED_IOS_SUPPORT_DIR/scripts/run_logged.py"
 if [[ ! -r "$LOGGED_RUNNER" ]]; then

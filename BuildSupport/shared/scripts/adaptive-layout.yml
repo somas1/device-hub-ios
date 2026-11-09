@@ -1,0 +1,9 @@
+# Lay out by available size and size classes, never by device type.
+# Reconstructed in this fork from the change that introduced the upstream rule
+# (it replaced userInterfaceIdiom-based snapshot layout with size-based layout).
+custom_rules:
+  adaptive_layout_without_device_idiom:
+    name: "Adaptive layout"
+    regex: '\buserInterfaceIdiom\b'
+    message: "Choose layout from the available size or size classes, not the device idiom."
+    severity: error

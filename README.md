@@ -46,13 +46,17 @@ the 27.1 iPhone Duo runtime. Protocol compatibility remains separate from the
 app's deployment target.
 
 Build, test, archive, and release entry points check the selected Xcode and
-installed iPhoneOS SDK with the shared `ios-build-support` toolchain checker
-before compiling. Set `DEVELOPER_DIR` to the Xcode 27.1 installation when that
-is not the machine's selected Xcode.
+installed iPhoneOS SDK before compiling. Set `DEVELOPER_DIR` to an Xcode 27.1
+or later installation when that is not the machine's selected Xcode, for
+example `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
 
-The Swift lint task loads the shared adaptive-layout rule from
-`~/code/ios-build-support`. Set `SHARED_IOS_SUPPORT_DIR` when that checkout is
-located elsewhere.
+The build and test scripts use small support tools kept in this repository at
+`BuildSupport/shared/scripts`: a logged command runner, the Xcode and SDK
+version check, and the Swift lint wrapper with its adaptive-layout rule (lay out
+by available size, not by device type). Set `SHARED_IOS_SUPPORT_DIR` to use a
+different copy of these tools. The signed release path
+(`Scripts/build-device-ipa.sh`) still needs the original author's private
+`ios-build-support` checkout.
 
 ## Getting started
 

@@ -9,7 +9,7 @@ source "$PROCESS_GUARD"
 source "$ROOT/BuildSupport/check_xcode_toolchain.sh"
 devicehub_require_guard test-core 900 "$0" "$@"
 
-SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$HOME/code/ios-build-support}"
+SHARED_IOS_SUPPORT_DIR="${SHARED_IOS_SUPPORT_DIR:-$ROOT/BuildSupport/shared}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$HOME/Library/Developer/Xcode/DerivedData/DeviceHub}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p)}"
 if [[ ! -r "$SHARED_IOS_SUPPORT_DIR/scripts/run_logged.py" ]]; then
