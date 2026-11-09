@@ -47,9 +47,9 @@ video rule collection and currently rejects mode-5 initialization with
 the framework ABI is valid and the exact known error, operation, and code match.
 Any other failure remains fail-closed.
 
-The harness uses the shared `codex-simulator-lease` supervisor when available.
-On an isolated host, it reuses one exact managed simulator or creates it and
-verifies its removal afterward. It never contacts a paired device or starts a
+The harness gets its simulator from `BuildSupport/simulator_setup.py`: it
+creates one fresh simulator for the run and verifies its removal afterward.
+It never contacts a paired device or starts a
 network stream. The probe runs as a direct simulator process with an isolated
 home; it does not install or launch an app through SpringBoard. A physical iOS
 27 device is still required to prove codec capability and decoded frames end

@@ -44,12 +44,14 @@ contributors.
 
 - Run only one heavyweight build, test, archive, simulator, or device
   operation at a time.
-- Route local simulator work through `codex-simulator-lease`; the repository
-  harness detects and uses that host-wide supervisor automatically. Never
-  bypass it in an agent session or replace it with a per-repository lock.
+- Let `BuildSupport/simulator_setup.py` own simulators: each `test:app`,
+  `test:media`, or snapshot run creates one fresh simulator and deletes only
+  that exact device afterwards. Do not add a host-wide lease, lock, or
+  watcher. See "Simulator ownership" in `Docs/Testing.md`.
 - Treat detached, aborted, timed-out, or signal-terminated simulator commands
-  as unresolved. Do not retry until `codex-simulator-lease status --json`
-  reports inactive after a successful `codex-simulator-lease reap`.
+  as unresolved. Before retrying, inspect the interrupted device's identity
+  and state, then run the helper's `cleanup` command with its original UDID
+  and name.
 - Do not create, boot, shut down, or delete simulators directly from another
   test script.
 - Do not leave detached processes, background jobs, simulators, or device
