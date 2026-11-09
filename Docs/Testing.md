@@ -165,6 +165,13 @@ Use `mise run snapshots:record` when an intentional visual change requires new
 iOS reference images. The task records the matrix and immediately reruns it in
 comparison mode so stale or incomplete references cannot pass silently.
 
+The committed references were recorded with Xcode 27.2 and its iOS 27.2 SDK.
+Text metrics shift slightly between SDK versions, so the snapshot comparison
+can fail with another Xcode even though the build is supported. When the
+project moves to a different Xcode, re-record with `mise run snapshots:record`
+and inspect every changed image: accept only text and spacing drift, never
+missing, clipped, or overlapping content.
+
 App integration also launches the simulator-only live fixture and checks its
 actual accessibility tree: Home, Lock, Keyboard, and Rotate must be absent
 from the canvas and present after opening More Controls. These checks use the
