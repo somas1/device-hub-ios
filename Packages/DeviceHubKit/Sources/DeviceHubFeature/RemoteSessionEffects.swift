@@ -36,9 +36,11 @@ extension RemoteSessionFeature {
                     )
                 )
             } catch is CancellationError {
-                _ = await sessionCoordinator.close(
-                    attemptID: attemptID
-                )
+                do {
+                    try await sessionCoordinator.close(attemptID: attemptID)
+                } catch {
+                    await send(.inputCleanupFailed(attemptID: attemptID, sessionID: nil, error: .inputCleanupFailed))
+                }
                 return
             } catch let error as DeviceHubError {
                 await send(
@@ -93,22 +95,19 @@ extension RemoteSessionFeature {
     /// Removes coordinator ownership synchronously, then releases input and
     /// disconnects the exact old attempt before any replacement may begin.
     func closeSessionEffect(
-        session: ActiveRemoteSession
+        session: ActiveRemoteSession,
+        state: inout State,
+        resumeViewing: Bool = false
     ) -> Effect<Action> {
+        state.pendingInputCleanup = InputCleanupOwnership(session: session, resumeViewing: resumeViewing)
         let sessionCoordinator = sessionCoordinator
         return .run { send in
-            guard let error = await sessionCoordinator.close(
-                attemptID: session.attemptID
-            ) else {
-                return
+            do {
+                try await sessionCoordinator.close(attemptID: session.attemptID)
+                await send(.inputCleanupFinished(attemptID: session.attemptID, sessionID: session.sessionID))
+            } catch {
+                await send(.inputCleanupFailed(attemptID: session.attemptID, sessionID: session.sessionID, error: .inputCleanupFailed))
             }
-            await send(
-                .inputCleanupFailed(
-                    attemptID: session.attemptID,
-                    sessionID: session.sessionID,
-                    error: error
-                )
-            )
         }
     }
 

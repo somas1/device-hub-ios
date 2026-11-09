@@ -104,6 +104,8 @@ public enum DiagnosticFailureCode:
     case deviceOffline
     case incorrectPairingCode
     case inputChannelFailed
+    case inputCleanupFailed
+    case inputCleanupTimeout
     case internalError
     case localNetworkDenied
     case malformedAnnouncement

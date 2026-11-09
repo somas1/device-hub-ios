@@ -145,8 +145,12 @@ struct RemoteSessionMediaTruthTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 
     @Test("Stale and out-of-order metadata cannot replace media truth")
@@ -230,6 +234,11 @@ struct RemoteSessionMediaTruthTests {
 
         await store.send(.deviceSelected(second.id)) {
             $0.selectedDeviceID = second.id
+            $0.pendingInputCleanup = InputCleanupOwnership(session: session, resumeViewing: true)
+            $0.session = nil
+        }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
+        await store.receive(\.startViewingButtonTapped) {
             $0.session = ActiveRemoteSession(
                 attemptID: nextAttemptID,
                 device: second,
@@ -246,8 +255,12 @@ struct RemoteSessionMediaTruthTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 }
 

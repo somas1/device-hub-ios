@@ -56,8 +56,12 @@ struct RemoteSessionRemediationTests {
         }
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 
     @Test("Pairing can request Local Network Settings from the app shell")

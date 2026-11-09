@@ -35,7 +35,7 @@ extension RemoteSessionFeature {
             )
             state.session = session
             return .concatenate(
-                closeSessionEffect(session: session),
+                closeSessionEffect(session: session, state: &state),
                 cancelSessionEffects()
             )
 
@@ -49,12 +49,15 @@ extension RemoteSessionFeature {
             DeviceHubFeatureTrace.emit(
                 "session_stream_failed error=\(String(describing: error))"
             )
+            if error == .inputCleanupFailed {
+                return .send(.inputCleanupFailed(attemptID: attemptID, sessionID: sessionID, error: error))
+            }
             session.connectionError = error
             state.activeContactIDs.removeAll()
             state.remediation = DeviceHubRemediation(error: error)
             state.session = session
             return .concatenate(
-                closeSessionEffect(session: session),
+                closeSessionEffect(session: session, state: &state),
                 cancelSessionEffects()
             )
 
@@ -84,11 +87,11 @@ extension RemoteSessionFeature {
             if case let .success(staleSession) = result {
                 let sessionCoordinator = sessionCoordinator
                 return .run { send in
-                    guard let error = await sessionCoordinator.close(
-                        attemptID: attemptID
-                    ) else {
+                    do {
+                        try await sessionCoordinator.close(attemptID: attemptID)
                         return
-                    }
+                    } catch {}
+                    let error = DeviceHubError.inputCleanupFailed
                     await send(
                         .inputCleanupFailed(
                             attemptID: attemptID,
@@ -103,6 +106,9 @@ extension RemoteSessionFeature {
 
         switch result {
         case let .failure(error):
+            if error == .inputCleanupFailed {
+                return .send(.inputCleanupFailed(attemptID: attemptID, sessionID: session.sessionID, error: error))
+            }
             DeviceHubFeatureTrace.emit(
                 "connection_failed error=\(String(describing: error))"
             )
@@ -141,6 +147,10 @@ extension RemoteSessionFeature {
             return .none
         }
 
+        guard !state.inputCleanupFailed, state.pendingInputCleanup == nil else { return .none }
+        if case .ended(.inputCleanupFailed) = update.event {
+            return .send(.inputCleanupFailed(attemptID: attemptID, sessionID: sessionID, error: .inputCleanupFailed))
+        }
         let wasAcceptingInput = session.acceptsInput
         var remoteState = session.remoteState
             ?? RemoteSessionState(
@@ -163,7 +173,7 @@ extension RemoteSessionFeature {
         if update.event.endsSession {
             state.activeContactIDs.removeAll()
             return .concatenate(
-                closeSessionEffect(session: session),
+                closeSessionEffect(session: session, state: &state),
                 cancelSessionEffects()
             )
         }

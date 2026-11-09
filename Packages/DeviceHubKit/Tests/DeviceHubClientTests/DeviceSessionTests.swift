@@ -34,7 +34,7 @@ struct DeviceSessionTests {
     }
 
     @Test
-    func disconnectIsIdempotentAcrossConcurrentAndSequentialCallers() async {
+    func disconnectIsIdempotentAcrossConcurrentAndSequentialCallers() async throws {
         let probe = DisconnectProbe()
         let session = DeviceSession.fixture(disconnect: {
             await probe.run()
@@ -42,7 +42,7 @@ struct DeviceSessionTests {
 
         let tasks = (0 ..< 8).map { _ in
             Task {
-                await session.disconnect()
+                try await session.disconnect()
             }
         }
 
@@ -52,21 +52,21 @@ struct DeviceSessionTests {
         await probe.complete()
 
         for task in tasks {
-            await task.value
+            try await task.value
         }
-        await session.disconnect()
+        try await session.disconnect()
 
         let finalCallCount = await probe.snapshot()
         expectNoDifference(finalCallCount, 1)
     }
 
     @Test
-    func commandsAfterDisconnectFailWithoutReachingTheTransport() async {
+    func commandsAfterDisconnectFailWithoutReachingTheTransport() async throws {
         let recorder = CommandRecorder()
         let session = DeviceSession.fixture { command in
             await recorder.record(command)
         }
-        await session.disconnect()
+        try await session.disconnect()
 
         do {
             try await session.command(.button(.lock, phase: .press))
@@ -211,7 +211,7 @@ struct DeviceSessionTests {
     }
 
     @Test
-    func disconnectTerminatesBothStreamsBeforeReturning() async {
+    func disconnectTerminatesBothStreamsBeforeReturning() async throws {
         let eventTermination = TerminationRecorder<
             AsyncThrowingStream<SessionUpdate, Error>.Continuation.Termination
         >()
@@ -242,7 +242,7 @@ struct DeviceSessionTests {
         }
         await Task.yield()
 
-        await session.disconnect()
+        try await session.disconnect()
         do {
             try await eventConsumer.value
         } catch {
@@ -257,7 +257,7 @@ struct DeviceSessionTests {
     }
 
     @Test
-    func consumerCancellationPropagatesToUpstreamEventSource() async {
+    func consumerCancellationPropagatesToUpstreamEventSource() async throws {
         let termination = TerminationRecorder<
             AsyncThrowingStream<SessionUpdate, Error>.Continuation.Termination
         >()

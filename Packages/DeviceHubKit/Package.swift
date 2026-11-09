@@ -205,6 +205,7 @@ let package = Package(
         .testTarget(
             name: "DeviceHubTransportTests",
             dependencies: [
+                "DeviceHubFeature",
                 "DeviceHubTransport",
                 .product(name: "CustomDump", package: "swift-custom-dump")
             ]

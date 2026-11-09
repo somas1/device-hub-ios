@@ -1,3 +1,4 @@
+import Darwin
 import DeviceHubCore
 import DeviceHubFFI
 @testable import DeviceHubLive
@@ -72,6 +73,23 @@ struct DeviceHubNativeSessionExecutorTests {
         )
     }
 
+    @Test(
+        "Cleanup error-out survives callback closure, repeated cancel, and free",
+        arguments: ["input_delivery_failed", "input_cleanup_timeout"]
+    )
+    func cleanupCancellationRetainsErrorOut(code: String) async throws {
+        let failure = NativeSessionFailure(code: code, stage: "input_cleanup", retryable: true)
+        let fixture = NativeExecutorFixture(cancelStatus: DH_STATUS_INTERNAL, cancelFailure: failure)
+        let executor = fixture.makeExecutor()
+        try await executor.createRemote(fixture.remoteRequest, operation: .controlStream)
+        for _ in 0 ..< 2 {
+            do { try await executor.cancel(); Issue.record("Cleanup failure was erased") }
+            catch { #expect(error == failure) }
+        }
+        #expect(fixture.recorder.calls == [.createRemote, .cancel, .errorFreed, .free])
+        #expect(fixture.cleanup.count == 1)
+    }
+
     @Test("free still runs when native cancellation reports a failure")
     func cancellationFailureStillFrees() async throws {
         let fixture = NativeExecutorFixture(cancelStatus: DH_STATUS_INTERNAL)
@@ -102,10 +120,12 @@ final class NativeExecutorFixture: @unchecked Sendable {
 
     init(
         cancelStatus: DhStatus = DH_STATUS_OK,
+        cancelFailure: NativeSessionFailure? = nil,
         remoteStartEvents: NativeFunctionRecorder.RemoteStartEvents = .none
     ) {
         recorder = NativeFunctionRecorder(
             cancelStatus: cancelStatus,
+            cancelFailure: cancelFailure,
             remoteStartEvents: remoteStartEvents
         )
     }
@@ -221,6 +241,7 @@ final class NativeFunctionRecorder: @unchecked Sendable {
         case createPairing
         case createRemote
         case free
+        case errorFreed
         case persistence(requestID: UInt64, succeeded: Bool)
         case start
         case videoControl(Data)
@@ -253,6 +274,8 @@ final class NativeFunctionRecorder: @unchecked Sendable {
         var remoteConfiguration: RemoteConfiguration?
     }
 
+    private let cancelErrorJSON: UnsafeMutablePointer<CChar>?
+    private let errorHandle = OpaquePointer(bitPattern: 0xE001)!
     private let cancelStatus: DhStatus
     private let handle = OpaquePointer(bitPattern: 0xD00D)!
     private let lock = NSLock()
@@ -261,11 +284,17 @@ final class NativeFunctionRecorder: @unchecked Sendable {
 
     init(
         cancelStatus: DhStatus,
+        cancelFailure: NativeSessionFailure? = nil,
         remoteStartEvents: RemoteStartEvents = .none
     ) {
+        cancelErrorJSON = cancelFailure.map {
+            strdup("{\"code\":\"\($0.code)\",\"stage\":\"\($0.stage)\",\"retryable\":true,\"message\":\"synthetic discarded message\"}")!
+        }
         self.cancelStatus = cancelStatus
         self.remoteStartEvents = remoteStartEvents
     }
+
+    deinit { free(cancelErrorJSON) }
 
     var callbackContexts: (control: UInt, media: UInt)? {
         lock.withLock { state.callbackContexts }
@@ -334,15 +363,24 @@ final class NativeFunctionRecorder: @unchecked Sendable {
                 output.pointee = handle
                 return DH_STATUS_OK
             },
-            errorFree: { error in
+            errorFree: { [self] error in
+                if error?.pointee == errorHandle {
+                    record(.errorFreed)
+                }
                 error?.pointee = nil
             },
-            errorJSON: { _ in nil },
-            sessionCancel: { [self] session, _ in
+            errorJSON: { [self] error in
+                guard error == errorHandle, let cancelErrorJSON else { return nil }
+                return UnsafePointer(cancelErrorJSON)
+            },
+            sessionCancel: { [self] session, error in
                 guard session == handle else {
                     return DH_STATUS_INVALID_ARGUMENT
                 }
                 record(.cancel)
+                if cancelErrorJSON != nil {
+                    error?.pointee = errorHandle
+                }
                 return cancelStatus
             },
             sessionCompletePersistence: completePersistence,

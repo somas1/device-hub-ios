@@ -212,6 +212,8 @@ struct DiagnosticWireMappingTests {
             "DEVICE_OFFLINE",
             "PAIRING_CODE_REJECTED",
             "INPUT_CHANNEL_FAILED",
+            "INPUT_CHANNEL_FAILED",
+            "INPUT_CHANNEL_FAILED",
             "INTERNAL_ERROR",
             "LOCAL_NETWORK_DENIED",
             "MALFORMED_ADVERTISEMENT",

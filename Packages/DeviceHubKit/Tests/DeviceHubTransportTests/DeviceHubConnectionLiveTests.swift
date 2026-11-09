@@ -124,7 +124,7 @@ struct DeviceHubConnectionLiveTests {
         )
 
         let session = try await client.connect(deviceID)
-        await session.disconnect()
+        try await session.disconnect()
 
         let recordedOperations = await operations.values
         expectNoDifference(

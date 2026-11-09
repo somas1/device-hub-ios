@@ -12,6 +12,9 @@ struct DeviceHubErrorTests {
     @Test
     func errorsHaveStableClassificationRetryabilityAndRemedies() throws {
         let expected: [DeviceHubError: Expectation] = [
+            .inputCleanupFailed: Expectation(
+                classification: .actionable, remedy: .retry, retryability: .userInitiated
+            ),
             .localNetworkDenied: Expectation(
                 classification: .actionable,
                 remedy: .grantLocalNetworkAccess,

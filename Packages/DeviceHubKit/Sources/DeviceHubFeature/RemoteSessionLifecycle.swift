@@ -20,6 +20,8 @@ extension RemoteSessionFeature {
                 guard previousLifecycle == .background else {
                     return .none
                 }
+                let resumeViewing = !state.isViewingStopped
+                state.pendingInputCleanup?.resumeViewing = resumeViewing
                 return .send(.task)
 
             case .background:
@@ -33,7 +35,7 @@ extension RemoteSessionFeature {
                     return cancelAllEffects()
                 }
                 return .concatenate(
-                    closeSessionEffect(session: previousSession),
+                    closeSessionEffect(session: previousSession, state: &state),
                     cancelAllEffects()
                 )
 

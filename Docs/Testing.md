@@ -146,6 +146,21 @@ The protocol suites should prove that:
 - an unknown media owner returns Device Busy instead of being stopped;
 - diagnostics remain typed, bounded, and redacted.
 
+Session teardown is covered in the Swift package tests:
+`DeviceSessionCoordinatorCleanupTests`, `RemoteSessionCleanupOutcomeTests`,
+`RemoteSessionTeardownLifetimeTests`, `InputCleanupOutcomeTests`,
+`NativeCommandExecutorTests`, and `TerminalCleanupCoordinatorTests`. They
+check that an explicit release failure is kept, queued input is rejected after
+it, disconnect throws and is idempotent (also after the transport owner is
+destroyed), a replacement session waits for the old close, a removed session
+keeps its cleanup owner, stale outcomes cannot change a successor, the warning
+stays until Retry, and Retry replays nothing. A release arriving during
+shutdown must join that shutdown's cleanup, with exact no-duplicate send and
+cancel counts, and a successful cleanup must close without an error. These are
+synthetic tests: they prove local reporting and fail-closed behavior, not that
+a device physically released input, and they do not cover the Rust worker's
+final-shutdown gap described in `Docs/Architecture.md`.
+
 ## Visual coverage
 
 Render and inspect the preview or snapshot matrix for:

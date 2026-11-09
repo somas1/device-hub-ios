@@ -55,6 +55,7 @@ actor NativeCommandExecutor {
 
     private var acceptingCommands = true
     private var didReleaseAllInput = false
+    private var cleanupFailure: NativeSessionFailure?
     private var heldInputs: [HeldInput] = []
     private var pendingCommands: [PendingCommand] = []
     private let pendingCommandCapacity: Int
@@ -144,11 +145,19 @@ actor NativeCommandExecutor {
     private func drain() async {
         while !pendingCommands.isEmpty {
             let pending = pendingCommands.removeFirst()
+            if cleanupFailure != nil, pending.command != .releaseAllInput {
+                await pending.promise.resolve(.failure(.disconnected))
+                continue
+            }
             do {
                 try await sendOperation(pending.command)
                 trackSuccessful(pending.command)
                 await pending.promise.resolve(.success(()))
             } catch {
+                if pending.command == .releaseAllInput || error.stage == "input_cleanup" {
+                    cleanupFailure = cleanupFailure ?? error
+                    acceptingCommands = false
+                }
                 await pending.promise.resolve(.failure(.native(error)))
             }
         }
@@ -229,13 +238,13 @@ actor NativeCommandExecutor {
     }
 
     private func performCleanup() async -> NativeSessionFailure? {
-        var firstFailure: NativeSessionFailure?
+        var firstFailure = cleanupFailure
         if !didReleaseAllInput {
             do {
                 try await sendOperation(.releaseAllInput)
                 trackSuccessful(.releaseAllInput)
             } catch {
-                firstFailure = error
+                firstFailure = firstFailure ?? error
             }
         }
         let releaseFailure = await releaseHeldInputs()

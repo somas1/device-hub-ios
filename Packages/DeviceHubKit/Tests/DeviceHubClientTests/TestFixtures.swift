@@ -39,7 +39,7 @@ extension DeviceSession {
             $0.finish()
         },
         command: @escaping @Sendable (DeviceCommand) async throws -> Void = { _ in },
-        disconnect: @escaping @Sendable () async -> Void = {}
+        disconnect: @escaping @Sendable () async throws -> Void = {}
     ) -> Self {
         Self(
             id: id,

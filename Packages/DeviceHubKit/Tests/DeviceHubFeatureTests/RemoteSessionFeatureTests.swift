@@ -67,6 +67,11 @@ struct RemoteSessionFeatureTests {
 
         await store.send(.deviceSelected(second.id)) {
             $0.selectedDeviceID = second.id
+            $0.pendingInputCleanup = InputCleanupOwnership(session: current, resumeViewing: true)
+            $0.session = nil
+        }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
+        await store.receive(\.startViewingButtonTapped) {
             $0.session = ActiveRemoteSession(
                 attemptID: nextAttemptID,
                 device: second,
@@ -75,8 +80,12 @@ struct RemoteSessionFeatureTests {
         }
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 
     @Test("Stale attempts and generations cannot replace the visible frame")
@@ -150,8 +159,12 @@ struct RemoteSessionFeatureTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 
     @Test("Unsafe input and rotation never reach the client")
@@ -260,8 +273,12 @@ struct RemoteSessionFeatureTests {
 
         await store.send(.stopViewingButtonTapped) {
             $0.isViewingStopped = true
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         await recorder.waitForDisconnect()
         let disconnectCount = await recorder.disconnectCount()
         expectNoDifference(disconnectCount, 1)
@@ -306,7 +323,11 @@ struct RemoteSessionFeatureTests {
             ) {
                 $0.remediation = DeviceHubRemediation(error: error)
                 $0.session?.connectionError = error
+                if let session = $0.session {
+                    $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+                }
             }
+            await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         }
     }
 
@@ -337,8 +358,12 @@ struct RemoteSessionFeatureTests {
             $0.activeContactIDs = []
             $0.lifecycle = .background
             $0.pairing = nil
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
     }
 
     @Test("Stop viewing is explicit and does not lose selection")
@@ -361,8 +386,12 @@ struct RemoteSessionFeatureTests {
 
         await store.send(.stopViewingButtonTapped) {
             $0.isViewingStopped = true
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         expectNoDifference(store.state.selectedDeviceID, device.id)
         #expect(store.state.sessionPresentation == nil)
     }
