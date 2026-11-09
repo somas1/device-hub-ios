@@ -9,7 +9,8 @@ import ImageIO
 /// Breaks the construction cycle between a session value and its actor owner.
 private actor RemoteSessionControl {
     private weak var operation: RemoteSessionOperation?
-    private var cleanupFailure: DeviceHubError?
+    /// Nil is absent evidence, not successful cleanup of an owner that vanished.
+    private var cleanupOutcome: Result<Void, DeviceHubError>?
 
     func bind(_ operation: RemoteSessionOperation) {
         self.operation = operation
@@ -17,21 +18,30 @@ private actor RemoteSessionControl {
 
     func send(_ command: DeviceCommand) async throws {
         guard let operation else {
-            throw DeviceHubError.connectionLost
+            guard command == .releaseAllInput, let cleanupOutcome else {
+                throw DeviceHubError.connectionLost
+            }
+            try cleanupOutcome.get()
+            return
         }
         try await operation.send(command)
     }
 
-    func retainCleanupFailure(_ failure: NativeSessionFailure?) {
+    func retainCleanupOutcome(_ failure: NativeSessionFailure?) {
+        if case .failure? = cleanupOutcome {
+            return
+        }
         if let failure {
-            cleanupFailure = cleanupFailure ?? mapNativeFailure(failure)
+            cleanupOutcome = .failure(mapNativeFailure(failure))
+        } else {
+            cleanupOutcome = .success(())
         }
     }
 
     func disconnect() async throws {
         try await operation?.disconnect()
-        if let cleanupFailure {
-            throw cleanupFailure
+        if let cleanupOutcome {
+            try cleanupOutcome.get()
         }
     }
 }
@@ -173,6 +183,13 @@ actor RemoteSessionOperation {
     }
 
     func send(_ command: DeviceCommand) async throws {
+        // A terminal release joins this owner's complete cleanup, not a new send.
+        if command == .releaseAllInput, let cleanupTask {
+            if let failure = await cleanupTask.value {
+                throw mapNativeFailure(failure)
+            }
+            return
+        }
         try validate(command)
         do {
             let submission = try await commands.submit(command)
@@ -180,7 +197,13 @@ actor RemoteSessionOperation {
         } catch {
             switch error {
             case .disconnected:
-                throw DeviceHubError.connectionLost
+                // Cleanup may start while actor-isolated admission is awaited.
+                guard command == .releaseAllInput, let cleanupTask else {
+                    throw DeviceHubError.connectionLost
+                }
+                if let failure = await cleanupTask.value {
+                    throw mapNativeFailure(failure)
+                }
             case .saturated:
                 throw DeviceHubError.deviceBusy
             case let .native(failure):
@@ -441,7 +464,7 @@ actor RemoteSessionOperation {
         }
         self.cleanupTask = cleanupTask
         let failure = await cleanupTask.value
-        await control.retainCleanupFailure(failure)
+        await control.retainCleanupOutcome(failure)
         if let failure {
             if failure.stage == "input_cleanup" {
                 await observeInputCleanup(failure)
