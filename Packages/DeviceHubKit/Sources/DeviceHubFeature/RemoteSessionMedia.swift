@@ -37,7 +37,8 @@ extension RemoteSessionFeature {
         sessionID: DeviceSessionID,
         frame: RemoteDisplayFrame
     ) {
-        guard var session = state.session,
+        guard !state.inputCleanupFailed, state.pendingInputCleanup == nil,
+              var session = state.session,
               session.attemptID == attemptID,
               session.sessionID == sessionID
         else {

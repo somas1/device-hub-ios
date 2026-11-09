@@ -59,8 +59,12 @@ struct RemoteSessionInputOrderingTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         await recorder.waitForCommandCount(3)
         let finalCommands = await recorder.snapshot()
         expectNoDifference(
@@ -92,8 +96,12 @@ struct RemoteSessionInputOrderingTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         await recorder.waitForCommandCount(2)
         let teardownCommands = await recorder.snapshot()
         expectNoDifference(
@@ -197,8 +205,12 @@ struct RemoteSessionInputOrderingTests {
 
         await store.send(.appLifecycleChanged(.background)) {
             $0.lifecycle = .background
+            if let session = $0.session {
+                $0.pendingInputCleanup = InputCleanupOwnership(session: session)
+            }
             $0.session = nil
         }
+        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         await recorder.waitForCommandCount(4)
     }
 }

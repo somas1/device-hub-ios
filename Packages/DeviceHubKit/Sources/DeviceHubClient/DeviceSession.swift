@@ -37,7 +37,7 @@ public struct DeviceSession: Identifiable, Sendable {
 
     private let commandOperation:
         @Sendable (DeviceCommand) async throws -> Void
-    private let disconnectOperation: @Sendable () async -> Void
+    private let disconnectOperation: @Sendable () async throws -> Void
 
     public init(
         id: DeviceSessionID,
@@ -45,7 +45,7 @@ public struct DeviceSession: Identifiable, Sendable {
         events sourceEvents: AsyncThrowingStream<SessionUpdate, Error>,
         frames sourceFrames: AsyncStream<RemoteDisplayFrame>,
         command: @escaping @Sendable (DeviceCommand) async throws -> Void,
-        disconnect: @escaping @Sendable () async -> Void
+        disconnect: @escaping @Sendable () async throws -> Void
     ) {
         let eventRelay = Self.makeEventRelay(sourceEvents)
         let frameRelay = Self.makeFrameRelay(sourceFrames)
@@ -61,7 +61,7 @@ public struct DeviceSession: Identifiable, Sendable {
         }
         self.device = device
         disconnectOperation = {
-            await lifetime.disconnect()
+            try await lifetime.disconnect()
         }
         events = eventRelay.stream
         frames = frameRelay.stream
@@ -74,8 +74,8 @@ public struct DeviceSession: Identifiable, Sendable {
     }
 
     /// Stops observation and tears down the underlying transport exactly once.
-    public func disconnect() async {
-        await disconnectOperation()
+    public func disconnect() async throws {
+        try await disconnectOperation()
     }
 
     /// Builds the ordered control-plane relay independently from frame pixels.
@@ -172,13 +172,12 @@ public struct DeviceSession: Identifiable, Sendable {
 private actor DeviceSessionLifetime {
     private enum State {
         case active
-        case disconnecting(Task<Void, Never>)
-        case disconnected
+        case disconnecting(Task<Void, Error>)
     }
 
     private let commandOperation:
         @Sendable (DeviceCommand) async throws -> Void
-    private let disconnectOperation: @Sendable () async -> Void
+    private let disconnectOperation: @Sendable () async throws -> Void
     private let eventRelay: Task<Void, Never>
     private let frameRelay: Task<Void, Never>
     private var state = State.active
@@ -187,7 +186,7 @@ private actor DeviceSessionLifetime {
         eventRelay: Task<Void, Never>,
         frameRelay: Task<Void, Never>,
         command: @escaping @Sendable (DeviceCommand) async throws -> Void,
-        disconnect: @escaping @Sendable () async -> Void
+        disconnect: @escaping @Sendable () async throws -> Void
     ) {
         commandOperation = command
         disconnectOperation = disconnect
@@ -207,8 +206,8 @@ private actor DeviceSessionLifetime {
         try await commandOperation(command)
     }
 
-    func disconnect() async {
-        let task: Task<Void, Never>
+    func disconnect() async throws {
+        let task: Task<Void, Error>
         switch state {
         case .active:
             let eventRelay = eventRelay
@@ -219,18 +218,14 @@ private actor DeviceSessionLifetime {
                 frameRelay.cancel()
                 await eventRelay.value
                 await frameRelay.value
-                await disconnectOperation()
+                try await disconnectOperation()
             }
             state = .disconnecting(task)
 
         case let .disconnecting(existingTask):
             task = existingTask
-
-        case .disconnected:
-            return
         }
 
-        await task.value
-        state = .disconnected
+        try await task.value
     }
 }

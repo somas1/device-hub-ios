@@ -5,6 +5,37 @@ import Testing
 
 @Suite("Native command executor", .timeLimit(.minutes(1)))
 struct NativeCommandExecutorTests {
+    @Test("A failed release rejects ordinary commands already queued behind it")
+    func releaseFailureDropsQueuedInput() async throws {
+        let sender = ControlledNativeSender()
+        let executor = NativeCommandExecutor { command async throws(NativeSessionFailure) in
+            if command == .releaseAllInput {
+                try await sender.send(command)
+            } else {
+                await sender.recordCommand(command)
+            }
+        }
+        let release = try await executor.submit(.releaseAllInput)
+        await sender.waitUntilReceived(1)
+        let queued = try await executor.submit(.keyTap(.character("x"), modifiers: []))
+        await sender.completeNext(with: .failure(NativeSessionFailure(
+            code: "input_cleanup_timeout", stage: "input_cleanup", retryable: true
+        )))
+        do { try await release.value(); Issue.record("Release unexpectedly succeeded") } catch {}
+        do {
+            try await queued.value()
+            Issue.record("Queued input survived cleanup failure")
+        } catch {
+            #expect(error == .disconnected)
+        }
+        let received = await sender.receivedCommands()
+        let shutdown = Task { await executor.shutdown() }
+        await sender.waitUntilReceived(received.count + 1)
+        await sender.completeNext()
+        #expect(await shutdown.value?.code == "input_cleanup_timeout")
+        #expect(await !(sender.receivedCommands()).contains(.keyTap(.character("x"), modifiers: [])))
+    }
+
     @Test("commands execute in submission order without overlap")
     func commandsAreFIFO() async throws {
         let sender = ControlledNativeSender()
@@ -316,6 +347,11 @@ private actor ControlledNativeSender {
         with result: Result<Void, NativeSessionFailure> = .success(())
     ) {
         completions.removeFirst().resume(returning: result)
+    }
+
+    func recordCommand(_ command: DeviceCommand) {
+        commands.append(command)
+        resumeSatisfiedReceiptWaiters()
     }
 
     func receivedCommands() -> [DeviceCommand] {

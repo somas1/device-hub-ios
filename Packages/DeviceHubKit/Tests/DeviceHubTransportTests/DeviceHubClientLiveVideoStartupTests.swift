@@ -75,7 +75,7 @@ struct DeviceHubClientLiveVideoStartupTests {
 
         let session = try await client.connect(deviceID)
         let results = await ingress.results
-        await session.disconnect()
+        try await session.disconnect()
 
         expectNoDifference(
             results,

@@ -9,6 +9,7 @@ import ImageIO
 /// Breaks the construction cycle between a session value and its actor owner.
 private actor RemoteSessionControl {
     private weak var operation: RemoteSessionOperation?
+    private var cleanupFailure: DeviceHubError?
 
     func bind(_ operation: RemoteSessionOperation) {
         self.operation = operation
@@ -21,8 +22,17 @@ private actor RemoteSessionControl {
         try await operation.send(command)
     }
 
-    func disconnect() async {
-        await operation?.disconnect()
+    func retainCleanupFailure(_ failure: NativeSessionFailure?) {
+        if let failure {
+            cleanupFailure = cleanupFailure ?? mapNativeFailure(failure)
+        }
+    }
+
+    func disconnect() async throws {
+        try await operation?.disconnect()
+        if let cleanupFailure {
+            throw cleanupFailure
+        }
     }
 }
 
@@ -34,6 +44,7 @@ actor RemoteSessionOperation {
     private let bonjour: RemotePairingBonjourClient
     private let claimedDeviceID: DeviceID
     private let commands: NativeCommandExecutor
+    private let control: RemoteSessionControl
     var cleanupTask: Task<NativeSessionFailure?, Never>?
     var decoder: HEVCVideoDecoder?
     var decoderConfiguration: HEVCConfiguration?
@@ -47,6 +58,7 @@ actor RemoteSessionOperation {
     private var nativeSession: NativeSession?
     private let now: @Sendable () -> Date
     private let observe: Observation
+    private let observeInputCleanup: @Sendable (NativeSessionFailure) async -> Void
     private let persistence: PairingPersistenceClient
     var frameTask: Task<Void, Never>?
     var mediaTask: Task<Void, Never>?
@@ -81,8 +93,10 @@ actor RemoteSessionOperation {
             persistence: environment.persistence,
             bonjour: environment.bonjour,
             observe: environment.observe,
+            observeInputCleanup: environment.observeInputCleanup,
             now: environment.now,
             commands: commands,
+            control: control,
             eventContinuation: eventPipe.continuation,
             frameContinuation: framePipe.continuation,
             deviceSession: DeviceSession(
@@ -94,7 +108,7 @@ actor RemoteSessionOperation {
                     try await control.send(command)
                 },
                 disconnect: {
-                    await control.disconnect()
+                    try await control.disconnect()
                 }
             )
         )
@@ -110,8 +124,10 @@ actor RemoteSessionOperation {
         persistence: PairingPersistenceClient,
         bonjour: RemotePairingBonjourClient,
         observe: @escaping Observation,
+        observeInputCleanup: @escaping @Sendable (NativeSessionFailure) async -> Void,
         now: @escaping @Sendable () -> Date,
         commands: NativeCommandExecutor,
+        control: RemoteSessionControl,
         eventContinuation:
         AsyncThrowingStream<SessionUpdate, Error>.Continuation,
         frameContinuation: AsyncStream<RemoteDisplayFrame>.Continuation,
@@ -120,6 +136,7 @@ actor RemoteSessionOperation {
         self.bonjour = bonjour
         self.claimedDeviceID = claimedDeviceID
         self.commands = commands
+        self.control = control
         self.deviceSession = deviceSession
         self.eventContinuation = eventContinuation
         self.frameContinuation = frameContinuation
@@ -127,6 +144,7 @@ actor RemoteSessionOperation {
         self.nativeSession = nativeSession
         self.now = now
         self.observe = observe
+        self.observeInputCleanup = observeInputCleanup
         self.persistence = persistence
         summary = initialDevice
     }
@@ -171,14 +189,17 @@ actor RemoteSessionOperation {
         }
     }
 
-    func disconnect() async {
+    func disconnect() async throws {
+        eventContinuation.finish()
         processingTask?.cancel()
         processingTask = nil
         mediaTask?.cancel()
         mediaTask = nil
         frameTask?.cancel()
         frameTask = nil
-        await cleanup()
+        if let failure = await cleanup() {
+            throw mapNativeFailure(failure)
+        }
     }
 
     private func consume(
@@ -192,17 +213,18 @@ actor RemoteSessionOperation {
                     break
                 }
             }
-            finishEvents(with: nil)
-            await cleanup()
+            let failure = await cleanup()
+            finishEvents(with: failure.map(mapNativeFailure))
         } catch is CancellationError {
             await cleanup()
         } catch let error as DeviceHubError {
-            finishEvents(with: error)
+            let cleanupFailure = await cleanup()
+            finishEvents(with: cleanupFailure?.stage == "input_cleanup" ? .inputCleanupFailed : error)
             await record(error, stage: .ready)
-            await cleanup()
         } catch let failure as NativeSessionFailure {
             let error = mapNativeFailure(failure)
-            finishEvents(with: error)
+            let cleanupFailure = await cleanup()
+            finishEvents(with: cleanupFailure?.stage == "input_cleanup" ? .inputCleanupFailed : error)
             await record(
                 error,
                 stage: nativeFailureDiagnosticStage(failure)
@@ -210,9 +232,9 @@ actor RemoteSessionOperation {
             await cleanup()
         } catch {
             let error = DeviceHubError.secureConnectionFailed
-            finishEvents(with: error)
+            let cleanupFailure = await cleanup()
+            finishEvents(with: cleanupFailure?.stage == "input_cleanup" ? .inputCleanupFailed : error)
             await record(error, stage: .ready)
-            await cleanup()
         }
     }
 
@@ -368,13 +390,12 @@ actor RemoteSessionOperation {
         }
     }
 
-    func cleanup() async {
+    @discardableResult
+    func cleanup() async -> NativeSessionFailure? {
         if let cleanupTask {
-            _ = await cleanupTask.value
-            return
+            return await cleanupTask.value
         }
         frameContinuation.finish()
-        eventContinuation.finish()
         mediaTask?.cancel()
         mediaTask = nil
         frameTask?.cancel()
@@ -413,15 +434,22 @@ actor RemoteSessionOperation {
                 cancellationFailure = nil
             }
             await bonjour.releaseDevice(claimedDeviceID)
-            return commandFailure ?? cancellationFailure
+            if let commandFailure {
+                return commandFailure
+            }
+            return cancellationFailure
         }
         self.cleanupTask = cleanupTask
-        if let failure = await cleanupTask.value {
-            await record(
-                mapNativeFailure(failure),
-                stage: .disconnecting
-            )
+        let failure = await cleanupTask.value
+        await control.retainCleanupFailure(failure)
+        if let failure {
+            if failure.stage == "input_cleanup" {
+                await observeInputCleanup(failure)
+            } else {
+                await record(mapNativeFailure(failure), stage: .disconnecting)
+            }
         }
+        return failure
     }
 
     func record(

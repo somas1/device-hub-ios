@@ -18,13 +18,15 @@ struct TransportDiagnosticSubmission: Sendable {
 
     static func failure(
         _ error: DeviceHubError,
-        stage: DiagnosticStage
+        stage: DiagnosticStage,
+        nativeFailure: NativeSessionFailure? = nil
     ) -> Self {
         Self(
             category: diagnosticCategory(for: stage),
             fields: DiagnosticFields(
                 outcome: .failed,
-                failureCode: diagnosticFailureCode(for: error),
+                failureCode: error == .inputCleanupFailed && nativeFailure?.code == "input_cleanup_timeout"
+                    ? .inputCleanupTimeout : diagnosticFailureCode(for: error),
                 retryability: diagnosticRetryability(for: error),
                 transport: .localNetwork,
                 service: diagnosticService(for: stage)

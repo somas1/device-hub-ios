@@ -12,11 +12,13 @@ actor DeviceSessionCoordinator {
     private struct OwnedSession {
         let attemptID: UUID
         var revokedInputMetadata: ScreenMetadata?
+        var cleanupFailure: DeviceHubError?
         let session: DeviceSession
     }
 
     private var activeSession: OwnedSession?
     private var latestAttemptID: UUID?
+    private var closingSession: (attemptID: UUID, task: Task<Void, Error>)?
 
     func command(
         _ command: DeviceCommand,
@@ -58,31 +60,49 @@ actor DeviceSessionCoordinator {
             try await activeSession.session.command(.releaseAllInput)
             return nil
         } catch {
-            return mapCleanupError(error)
+            if self.activeSession?.attemptID == attemptID {
+                self.activeSession?.cleanupFailure = .inputCleanupFailed
+            }
+            return .inputCleanupFailed
         }
     }
 
-    /// Closes only the matching attempt after cleanup has entered its FIFO.
-    func close(attemptID: UUID) async -> DeviceHubError? {
+    /// Every caller shares the same release/disconnect task and retained outcome.
+    func close(attemptID: UUID) async throws {
         if latestAttemptID == attemptID {
             latestAttemptID = nil
         }
-        guard let activeSession,
-              activeSession.attemptID == attemptID
-        else {
-            return nil
+        if let closingSession, closingSession.attemptID == attemptID {
+            try await closingSession.task.value
+            return
         }
+        guard let owned = activeSession, owned.attemptID == attemptID else { return }
+        activeSession = nil
+        let task = Task<Void, Error> {
+            var failure = owned.cleanupFailure
+            do {
+                try await owned.session.command(.releaseAllInput)
+            } catch {
+                failure = failure ?? .inputCleanupFailed
+            }
+            do {
+                try await owned.session.disconnect()
+            } catch {
+                failure = failure ?? .inputCleanupFailed
+            }
+            if let failure {
+                throw failure
+            }
+        }
+        closingSession = (attemptID, task)
+        try await task.value
+    }
 
-        self.activeSession = nil
-        let cleanupError: DeviceHubError?
-        do {
-            try await activeSession.session.command(.releaseAllInput)
-            cleanupError = nil
-        } catch {
-            cleanupError = mapCleanupError(error)
-        }
-        await activeSession.session.disconnect()
-        return cleanupError
+    /// Only an explicit acknowledged Retry may discard a settled old outcome.
+    func acknowledgeCleanupFailure() async {
+        guard let closingSession else { return }
+        _ = await closingSession.task.result
+        self.closingSession = nil
     }
 
     func replace(
@@ -91,34 +111,24 @@ actor DeviceSessionCoordinator {
         using client: DeviceHubClient
     ) async throws -> DeviceSession {
         try Task.checkCancellation()
+        if let activeSession {
+            try await close(attemptID: activeSession.attemptID)
+        }
+        if let closingSession {
+            try await closingSession.task.value
+        }
+        try Task.checkCancellation()
         latestAttemptID = attemptID
-
         let session = try await client.connect(deviceID)
-        guard !Task.isCancelled,
-              latestAttemptID == attemptID
-        else {
-            await session.disconnect()
+        guard !Task.isCancelled, latestAttemptID == attemptID else {
+            try await session.disconnect()
             throw CancellationError()
         }
         guard activeSession == nil else {
-            await session.disconnect()
+            try await session.disconnect()
             throw DeviceHubError.connectionLost
         }
-        activeSession = OwnedSession(
-            attemptID: attemptID,
-            revokedInputMetadata: nil,
-            session: session
-        )
+        activeSession = OwnedSession(attemptID: attemptID, revokedInputMetadata: nil, cleanupFailure: nil, session: session)
         return session
-    }
-
-    private func mapCleanupError(_ error: any Error) -> DeviceHubError {
-        if let error = error as? DeviceHubError {
-            return error
-        }
-        if error is CancellationError {
-            return .connectionLost
-        }
-        return .secureConnectionFailed
     }
 }

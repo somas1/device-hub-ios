@@ -36,9 +36,11 @@ extension RemoteSessionFeature {
             return .none
 
         case .remediationButtonTapped:
+            guard state.pendingInputCleanup == nil else { return .none }
             return handleRemediation(state: &state)
 
         case .remediationDismissed:
+            guard !state.inputCleanupFailed else { return .none }
             state.remediation = nil
             return .none
 

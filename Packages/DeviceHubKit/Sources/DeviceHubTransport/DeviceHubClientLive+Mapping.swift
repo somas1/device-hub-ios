@@ -49,7 +49,10 @@ extension NativeConnectionPhase {
 func mapNativeFailure(
     _ failure: NativeSessionFailure
 ) -> DeviceHubError {
-    switch failure.code {
+    if failure.stage == "input_cleanup" || failure.code == "input_cleanup_timeout" {
+        return .inputCleanupFailed
+    }
+    return switch failure.code {
     case "bonjour_authentication_failed",
          "pair_verify_failed":
         .peerAuthenticationFailed

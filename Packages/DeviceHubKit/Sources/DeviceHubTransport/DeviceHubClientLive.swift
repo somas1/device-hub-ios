@@ -119,6 +119,11 @@ extension DeviceHubClient {
                         .failure(error, stage: stage)
                     )
                 },
+                observeInputCleanup: { failure in
+                    diagnosticsPipeline.submit(.failure(
+                        .inputCleanupFailed, stage: .disconnecting, nativeFailure: failure
+                    ))
+                },
                 observePairingMilestone: { milestone in
                     diagnosticsPipeline.submit(.milestone(milestone))
                 },
@@ -232,6 +237,7 @@ struct DeviceHubTransportEnvironment: Sendable {
     let persistence: PairingPersistenceClient
     let bonjour: RemotePairingBonjourClient
     let observe: Observation
+    let observeInputCleanup: @Sendable (NativeSessionFailure) async -> Void
     let observePairingMilestone: PairingMilestoneObservation
     let now: @Sendable () -> Date
     let makeUUID: @Sendable () -> UUID
@@ -240,6 +246,7 @@ struct DeviceHubTransportEnvironment: Sendable {
         persistence: PairingPersistenceClient,
         bonjour: RemotePairingBonjourClient,
         observe: @escaping DiagnosticSink,
+        observeInputCleanup: (@Sendable (NativeSessionFailure) async -> Void)? = nil,
         observePairingMilestone:
         @escaping PairingMilestoneSink = { _ in },
         now: @escaping @Sendable () -> Date,
@@ -258,6 +265,10 @@ struct DeviceHubTransportEnvironment: Sendable {
             } catch {
                 reportDiagnosticsFailure(stage)
             }
+        }
+        let observation = self.observe
+        self.observeInputCleanup = observeInputCleanup ?? { failure in
+            await observation(mapNativeFailure(failure), .disconnecting)
         }
         self.observePairingMilestone = { milestone in
             do {
@@ -467,7 +478,7 @@ private actor DeviceHubTransportRuntime {
         do {
             try await operation.start()
         } catch {
-            await operation.disconnect()
+            try await operation.disconnect()
             throw error
         }
         return operation.deviceSession

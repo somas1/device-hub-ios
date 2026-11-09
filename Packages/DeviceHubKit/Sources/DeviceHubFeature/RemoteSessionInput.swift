@@ -20,6 +20,9 @@ extension RemoteSessionFeature {
             else {
                 return .none
             }
+            if error == .inputCleanupFailed {
+                return .send(.inputCleanupFailed(attemptID: attemptID, sessionID: sessionID, error: error))
+            }
             session.pendingCommands.removeAll(keepingCapacity: false)
             session.connectionError = error
             state.session = session
@@ -50,17 +53,8 @@ extension RemoteSessionFeature {
             }
             return sendPendingCommand(nextCommand)
 
-        case let .inputCleanupFailed(attemptID, sessionID, error):
-            guard var session = state.session,
-                  session.attemptID == attemptID,
-                  sessionID == nil || session.sessionID == sessionID
-            else {
-                return .none
-            }
-            session.connectionError = error
-            state.session = session
-            state.remediation = DeviceHubRemediation(error: error)
-            return .none
+        case .inputCleanupFinished, .inputCleanupFailed:
+            return reduceInputCleanup(state: &state, action: action)
 
         case let .keyChanged(command):
             return sendCommandIfAllowed(
@@ -106,6 +100,40 @@ extension RemoteSessionFeature {
                 point: point,
                 viewport: viewport
             )
+
+        default:
+            return .none
+        }
+    }
+
+    private func reduceInputCleanup(state: inout State, action: Action) -> Effect<Action> {
+        switch action {
+        case let .inputCleanupFinished(attemptID, sessionID):
+            guard state.session == nil || state.session?.attemptID == attemptID else { return .none }
+            guard let owner = state.pendingInputCleanup,
+                  owner.attemptID == attemptID, owner.sessionID == sessionID else { return .none }
+            state.pendingInputCleanup = nil
+            guard owner.resumeViewing, !state.inputCleanupFailed,
+                  state.lifecycle == .active, !state.isViewingStopped else { return .none }
+            return .send(.startViewingButtonTapped)
+
+        case let .inputCleanupFailed(attemptID, sessionID, _):
+            let pending = state.pendingInputCleanup
+            let ownsPending = pending?.attemptID == attemptID && pending?.sessionID == sessionID
+            let ownsLive = state.session?.attemptID == attemptID
+                && (sessionID == nil || state.session?.sessionID == sessionID)
+            guard ownsLive || (ownsPending && state.session == nil) else { return .none }
+            let session = state.session
+            state.activeContactIDs.removeAll()
+            state.session = nil
+            state.inputCleanupFailed = true
+            state.remediation = DeviceHubRemediation(error: .inputCleanupFailed)
+            if ownsPending {
+                state.pendingInputCleanup = nil
+                return cancelSessionEffects()
+            }
+            guard let session else { return .none }
+            return .concatenate(closeSessionEffect(session: session, state: &state), cancelSessionEffects())
 
         default:
             return .none

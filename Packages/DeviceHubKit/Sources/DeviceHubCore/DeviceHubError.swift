@@ -25,6 +25,7 @@ public enum DeviceHubError: Error, CaseIterable, Codable, Hashable, Sendable {
     case secureConnectionFailed
     case mediaStalled
     case decoderFailed
+    case inputCleanupFailed
 
     public enum Classification: Codable, Equatable, Sendable {
         case actionable
@@ -98,7 +99,8 @@ public enum DeviceHubError: Error, CaseIterable, Codable, Hashable, Sendable {
              .deviceLocked,
              .deviceBusy,
              .developerImageUnavailable,
-             .developerImageIncompatible:
+             .developerImageIncompatible,
+             .inputCleanupFailed:
             .actionable
 
         case .corruptPairingRecord,
@@ -127,7 +129,8 @@ public enum DeviceHubError: Error, CaseIterable, Codable, Hashable, Sendable {
 
         case .pairingTimedOut,
              .pairingRejected,
-             .incorrectPairingCode:
+             .incorrectPairingCode,
+             .inputCleanupFailed:
             .userInitiated
 
         case .localNetworkDenied,
@@ -156,7 +159,8 @@ public enum DeviceHubError: Error, CaseIterable, Codable, Hashable, Sendable {
              .incorrectPairingCode,
              .secureConnectionFailed,
              .mediaStalled,
-             .decoderFailed:
+             .decoderFailed,
+             .inputCleanupFailed:
             .retry
         case .needsPairing,
              .corruptPairingRecord,
@@ -278,6 +282,11 @@ public enum DeviceHubError: Error, CaseIterable, Codable, Hashable, Sendable {
             UserFacingCopy(
                 title: "Live View Paused",
                 message: "Device Hub is restarting the live view."
+            )
+        case .inputCleanupFailed:
+            UserFacingCopy(
+                title: "Input Release Is Unconfirmed",
+                message: "The device may still have held input. Control is stopped. Check the device, then explicitly try again to start a fresh session."
             )
         case .decoderFailed:
             UserFacingCopy(

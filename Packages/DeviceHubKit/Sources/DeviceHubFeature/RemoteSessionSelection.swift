@@ -42,18 +42,23 @@ extension RemoteSessionFeature {
                     devices: devices
                 )
             case let .failure(error):
+                guard !state.inputCleanupFailed else { return .none }
                 state.remediation = DeviceHubRemediation(error: error)
                 return .none
             }
 
         case .retrySelectedDevice:
+            guard state.pendingInputCleanup == nil else { return .none }
+            let acknowledge = state.inputCleanupFailed
+            state.inputCleanupFailed = false
             guard let device = state.selectedDevice else {
                 return .none
             }
-            return beginSessionIfPossible(
-                state: &state,
-                device: device
-            )
+            let begin = beginSessionIfPossible(state: &state, device: device)
+            guard acknowledge else { return begin }
+            return .concatenate(.run { [sessionCoordinator] _ in
+                await sessionCoordinator.acknowledgeCleanupFailure()
+            }, begin)
 
         case .startViewingButtonTapped:
             guard let device = state.selectedDevice else {
@@ -77,7 +82,7 @@ extension RemoteSessionFeature {
                 return cancelSessionEffects()
             }
             return .concatenate(
-                closeSessionEffect(session: previousSession),
+                closeSessionEffect(session: previousSession, state: &state),
                 cancelSessionEffects()
             )
 
@@ -90,24 +95,21 @@ extension RemoteSessionFeature {
         state: inout State,
         device: DeviceSummary
     ) -> Effect<Action> {
+        guard !state.inputCleanupFailed, state.pendingInputCleanup == nil else { return .none }
         let previousSession = state.session
         state.activeContactIDs.removeAll()
         state.isViewingStopped = false
         state.remediation = nil
         state.session = nil
-
-        guard state.lifecycle == .active,
-              device.pairingState == .paired,
-              device.reachability == .reachable
-        else {
-            guard let previousSession else {
-                return cancelSessionEffects()
-            }
+        let mayConnect = state.lifecycle == .active && device.pairingState == .paired
+            && device.reachability == .reachable
+        if let previousSession {
             return .concatenate(
-                closeSessionEffect(session: previousSession),
+                closeSessionEffect(session: previousSession, state: &state, resumeViewing: mayConnect),
                 cancelSessionEffects()
             )
         }
+        guard mayConnect else { return cancelSessionEffects() }
 
         let attemptID = uuid()
         state.session = ActiveRemoteSession(
@@ -120,17 +122,7 @@ extension RemoteSessionFeature {
             deviceID: device.id,
             cancelID: .connect
         )
-        guard let previousSession else {
-            return .concatenate(
-                cancelSessionEffects(),
-                connect
-            )
-        }
-        return .concatenate(
-            closeSessionEffect(session: previousSession),
-            cancelSessionEffects(),
-            connect
-        )
+        return .concatenate(cancelSessionEffects(), connect)
     }
 
     func reconcileRoster(
@@ -160,7 +152,7 @@ extension RemoteSessionFeature {
                     return cancelSessionEffects()
                 }
                 return .concatenate(
-                    closeSessionEffect(session: previousSession),
+                    closeSessionEffect(session: previousSession, state: &state),
                     cancelSessionEffects()
                 )
             }
@@ -204,7 +196,7 @@ extension RemoteSessionFeature {
             state.remediation = DeviceHubRemediation(error: .needsPairing)
             state.activeContactIDs.removeAll()
             return .concatenate(
-                closeSessionEffect(session: session),
+                closeSessionEffect(session: session, state: &state),
                 cancelSessionEffects()
             )
         }

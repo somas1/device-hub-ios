@@ -103,6 +103,7 @@ func makeClient(
     diagnosticSink:
     @escaping @Sendable (DeviceHubError, DiagnosticStage) async throws
         -> Void = { _, _ in },
+    inputCleanupSink: (@Sendable (NativeSessionFailure) async -> Void)? = nil,
     pairingMilestoneSink:
     @escaping @Sendable (PairingDiagnosticMilestone) async throws
         -> Void = { _ in },
@@ -122,6 +123,7 @@ func makeClient(
             persistence: persistence,
             bonjour: bonjour,
             observe: diagnosticSink,
+            observeInputCleanup: inputCleanupSink,
             observePairingMilestone: pairingMilestoneSink,
             now: { now },
             makeUUID: { clientGeneration.rawValue },

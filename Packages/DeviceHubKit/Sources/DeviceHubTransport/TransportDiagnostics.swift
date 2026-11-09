@@ -40,6 +40,7 @@ func diagnosticFailureCode(
     case .secureConnectionFailed: .secureConnectionFailed
     case .mediaStalled: .mediaStalled
     case .decoderFailed: .decoderFailed
+    case .inputCleanupFailed: .inputCleanupFailed
     }
 }
 

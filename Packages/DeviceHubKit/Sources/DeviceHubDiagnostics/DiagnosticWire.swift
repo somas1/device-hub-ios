@@ -583,6 +583,8 @@ struct DiagnosticWireEvent: Encodable, Sendable {
         .deviceOffline: .deviceOffline,
         .incorrectPairingCode: .pairingCodeRejected,
         .inputChannelFailed: .inputChannelFailed,
+        .inputCleanupFailed: .inputChannelFailed,
+        .inputCleanupTimeout: .inputChannelFailed,
         .internalError: .internalError,
         .localNetworkDenied: .localNetworkDenied,
         .malformedAnnouncement: .malformedAdvertisement,

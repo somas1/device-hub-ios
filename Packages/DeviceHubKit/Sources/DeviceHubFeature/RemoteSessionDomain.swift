@@ -3,6 +3,18 @@ import DeviceHubClient
 import DeviceHubCore
 import Foundation
 
+public struct InputCleanupOwnership: Equatable, Sendable {
+    public let attemptID: UUID
+    public let sessionID: DeviceSessionID?
+    public var resumeViewing: Bool
+
+    public init(session: ActiveRemoteSession, resumeViewing: Bool = false) {
+        attemptID = session.attemptID
+        sessionID = session.sessionID
+        self.resumeViewing = resumeViewing
+    }
+}
+
 public extension RemoteSessionFeature {
     /// Complete, renderable state for the screen-first device hub experience.
     ///
@@ -34,6 +46,9 @@ public extension RemoteSessionFeature {
         public var selectedDeviceID: DeviceID?
         /// Ephemeral state for the one connection attempt owned by the feature.
         public var session: ActiveRemoteSession?
+        /// Retains exact teardown ownership after removing the visible session.
+        public var pendingInputCleanup: InputCleanupOwnership?
+        public var inputCleanupFailed = false
 
         public init(
             activeContactIDs: Set<UInt8> = [],
@@ -61,6 +76,7 @@ public extension RemoteSessionFeature {
             self.roster = roster
             self.selectedDeviceID = selectedDeviceID
             self.session = session
+            pendingInputCleanup = nil
         }
 
         public var selectedDevice: DeviceSummary? {
@@ -112,7 +128,8 @@ public extension RemoteSessionFeature {
 
         /// Central UI gate used by every touch, key, and hardware-button action.
         public var acceptsInput: Bool {
-            lifecycle == .active && session?.acceptsInput == true
+            lifecycle == .active && !inputCleanupFailed
+                && pendingInputCleanup == nil && session?.acceptsInput == true
         }
     }
 
@@ -151,6 +168,7 @@ public extension RemoteSessionFeature {
             attemptID: UUID,
             sessionID: DeviceSessionID
         )
+        case inputCleanupFinished(attemptID: UUID, sessionID: DeviceSessionID?)
         case inputCleanupFailed(
             attemptID: UUID,
             sessionID: DeviceSessionID?,
