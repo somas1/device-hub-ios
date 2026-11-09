@@ -57,6 +57,35 @@ Changing targets performs this sequence:
 Freeing a Rust session cancels and joins its structured tasks. Its callback
 context cannot be invoked after the corresponding free operation returns.
 
+### Input cleanup outcome
+
+`DeviceSession.disconnect` and the coordinator's `close` are async throwing.
+All callers share one settled release-then-disconnect task: a release failure
+does not skip the disconnect, and a replacement session cannot connect until
+the previous close has settled. Only an explicit Retry acknowledges a failed
+outcome and creates fresh ownership; no old commands or contacts carry over.
+
+A terminal release joins its transport owner's complete cleanup task,
+including native cancellation and device-claim release, instead of sending a
+new command to a closed lane. The session control keeps an explicit settled
+success or failure after cleanup, even when its weak transport owner is gone.
+Only release may use that result; no recorded result and ordinary commands
+still fail closed, and a failure cannot be replaced by a later success. The
+session facade rejects every command, including release, during and after its
+own disconnect.
+
+The feature keeps the exact attempt and session cleanup owner after removing
+the visible session. A matching teardown failure latches `inputCleanupFailed`
+("Input Release Is Unconfirmed"). Late frames, readiness, foreground, roster
+updates, selection, and Start Viewing cannot clear it, and cleanup results
+from a superseded attempt cannot change its successor. A successful cleanup
+is not proof that the device physically released input.
+
+Known gap: a release failure that happens only inside the Rust worker's final
+shutdown or cancellation can still go unreported, because the Rust layer does
+not yet keep that result for Swift. Explicit `releaseAllInput` failures and
+failures reported through the session's event stream do reach Swift.
+
 ## Dependency rules
 
 - Features never receive raw Rust pointers, pair records, network addresses,

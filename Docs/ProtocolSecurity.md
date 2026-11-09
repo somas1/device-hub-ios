@@ -158,6 +158,12 @@ visible, typed failure rather than an implicit mounting flow.
 - Media teardown always names this app's session UUID. The upstream
   `stopAll=true` convenience call is prohibited. If another host owns an unknown
   media session, the app reports Device Busy rather than stopping that session.
+- A failed input release is reported as the redacted, user-visible
+  `inputCleanupFailed` error, even when the session's public streams have
+  already finished. Its copy says release is unconfirmed, not successful.
+  Local diagnostics tell a native cleanup timeout apart; the upload schema maps
+  cleanup failures to `INPUT_CHANNEL_FAILED`. No raw error message or input
+  content is kept.
 
 ## Diagnostics boundary
 
