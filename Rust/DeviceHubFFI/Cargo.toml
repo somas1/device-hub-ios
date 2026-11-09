@@ -26,3 +26,6 @@ zeroize = { version = "1.8", features = ["derive"] }
 [package.metadata.device-hub]
 idevice-upstream = "https://github.com/jkcoxson/idevice.git"
 idevice-revision = "a64b8867815b3da17b5c927531bdba877e8456ef"
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["test-util"] }

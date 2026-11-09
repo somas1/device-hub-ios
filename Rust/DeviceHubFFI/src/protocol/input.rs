@@ -4,8 +4,8 @@ pub(super) async fn run_control_stream(
     handshake: &mut RsdHandshake,
     emitter: &EventEmitter,
     media: &MediaEmitter,
-    mut controls: ControlGate,
-    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    controls: ControlGate,
+    cancellation: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), PublicFailure> {
     require_control_services(handshake)?;
     emitter.phase(
@@ -91,7 +91,7 @@ pub(super) async fn run_control_stream(
         UniversalHidServiceClient::connect_rsd(adapter, handshake),
     )
     .await?;
-    let mut indigo_hid = stage(
+    let indigo_hid = stage(
         INPUT_TIMEOUT,
         input_service_connection_failed(),
         IndigoHidClient::connect_rsd(adapter, handshake),
@@ -138,7 +138,38 @@ pub(super) async fn run_control_stream(
     update_geometry_orientation(&mut video.geometry, &initial_orientation)?;
     let _audio_udp = audio_udp;
     let _display = display;
-    let mut cleanup = InputCleanupState::default();
+    run_active_control_loop(
+        video_udp,
+        universal_hid,
+        keyboard_service_id,
+        indigo_hid,
+        orientation,
+        controls,
+        cancellation,
+        video,
+        VideoFeedbackState::new(our_video_ssrc, negotiated_video.ssrc, video_call_id),
+        emitter,
+        media,
+    )
+    .await
+}
+
+/// Runs the real ready-stream loop and its input cleanup, after authenticated setup.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_active_control_loop(
+    video_udp: tcp::handle::UdpSocketHandle,
+    mut universal_hid: UniversalHidServiceClient<Box<dyn idevice::ReadWrite>>,
+    keyboard_service_id: u64,
+    mut indigo_hid: IndigoHidClient<Box<dyn idevice::ReadWrite>>,
+    mut orientation: OrientationServiceClient<Box<dyn idevice::ReadWrite>>,
+    mut controls: ControlGate,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    mut video: LiveVideoState,
+    mut feedback: VideoFeedbackState,
+    emitter: &EventEmitter,
+    media: &MediaEmitter,
+) -> Result<(), PublicFailure> {
+    let mut cleanup = InputCleanupState::for_session(emitter);
     let first_video_frame_deadline = tokio::time::sleep(FIRST_VIDEO_FRAME_TIMEOUT);
     tokio::pin!(first_video_frame_deadline);
     let mut has_emitted_video_access_unit = false;
@@ -148,16 +179,18 @@ pub(super) async fn run_control_stream(
         VIDEO_FEEDBACK_INTERVAL,
     );
     feedback_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut feedback =
-        VideoFeedbackState::new(our_video_ssrc, negotiated_video.ssrc, video_call_id);
 
-    let result = 'stream: loop {
+    let result = tokio::select! {
+        biased;
+        _ = async {
+            let already_cancelled = *cancellation.borrow();
+            if !already_cancelled {
+                let _ = cancellation.changed().await;
+            }
+        } => Ok(()),
+        result = async { 'stream: loop {
         tokio::select! {
             biased;
-            changed = cancellation.changed() => {
-                let _ = changed;
-                break Ok(());
-            }
             datagram = video_udp.recv() => {
                 match datagram {
                     Ok(datagram) => {
@@ -240,16 +273,24 @@ pub(super) async fn run_control_stream(
                 }
             }
         }
+    }} => result,
     };
 
-    cleanup_inputs(
+    let cleanup_result = cleanup_inputs(
         &mut cleanup,
         &mut universal_hid,
         keyboard_service_id,
         &mut indigo_hid,
     )
     .await;
-    result
+    // A cancelled compound release must not discard a known individual failure.
+    if let Some(failure) = cleanup.retained_release_failure() {
+        Err(failure)
+    } else if matches!(&result, Err(failure) if failure.stage == "input_cleanup") {
+        result
+    } else {
+        cleanup_result.and(result)
+    }
 }
 
 pub(super) fn input_trace_label(command: &ControlCommand) -> Option<String> {
@@ -301,6 +342,7 @@ pub(super) struct InputCleanupState {
     pub(super) touch_active: bool,
     pub(super) pressed_keys: BTreeMap<u16, u8>,
     pub(super) pressed_buttons: Vec<HardwareButton>,
+    pub(super) first_release_failure: std::sync::Arc<std::sync::Mutex<Option<PublicFailure>>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,6 +353,28 @@ pub(super) enum InputReleaseAction {
 }
 
 impl InputCleanupState {
+    pub(super) fn for_session(emitter: &EventEmitter) -> Self {
+        Self {
+            first_release_failure: emitter.cleanup_failure_slot(),
+            ..Default::default()
+        }
+    }
+
+    fn remember_release_failure(&self, failure: PublicFailure) -> PublicFailure {
+        *self
+            .first_release_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert(failure)
+    }
+
+    pub(super) fn retained_release_failure(&self) -> Option<PublicFailure> {
+        *self
+            .first_release_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     pub(super) fn release_plan(&self) -> Vec<InputReleaseAction> {
         let mut plan = Vec::with_capacity(2 + self.pressed_buttons.len());
         if self.touch_active {
@@ -378,14 +442,13 @@ impl InputReleaseSink for HidInputReleaseSink<'_> {
     }
 }
 
-async fn cleanup_inputs(
+pub(super) async fn cleanup_inputs(
     cleanup: &mut InputCleanupState,
     universal_hid: &mut UniversalHidServiceClient<Box<dyn idevice::ReadWrite>>,
     keyboard_service_id: u64,
     indigo_hid: &mut IndigoHidClient<Box<dyn idevice::ReadWrite>>,
-) {
-    let _ =
-        release_all_inputs_bounded(cleanup, universal_hid, keyboard_service_id, indigo_hid).await;
+) -> Result<(), PublicFailure> {
+    release_all_inputs_bounded(cleanup, universal_hid, keyboard_service_id, indigo_hid).await
 }
 
 async fn release_all_inputs_bounded(
@@ -400,12 +463,13 @@ async fn release_all_inputs_bounded(
     )
     .await
     .map_err(|_| {
-        PublicFailure::new(
+        let failure = PublicFailure::new(
             "input_cleanup_timeout",
             "input_cleanup",
             true,
             "Releasing native held input exceeded the bounded cleanup window.",
-        )
+        );
+        cleanup.remember_release_failure(failure)
     })?
 }
 
@@ -432,8 +496,10 @@ pub(super) async fn release_all_inputs_with_sink(
         match sink.release(action).await {
             Ok(()) => cleanup.did_release(action),
             Err(error) => {
+                let failure = classify_hid_error(error, "input_cleanup");
+                cleanup.remember_release_failure(failure);
                 if first_failure.is_none() {
-                    first_failure = Some(classify_hid_error(error, "input_cleanup"));
+                    first_failure = Some(failure);
                 }
             }
         }
@@ -494,10 +560,11 @@ pub(super) async fn handle_keyboard_intent_with_sink(
             if next.insert(usage, modifiers).is_some() {
                 return Err(invalid_keyboard_transition());
             }
-            sink.replace(keyboard_usages(&next)?)
+            let usages = keyboard_usages(&next)?;
+            cleanup.pressed_keys = next;
+            sink.replace(usages)
                 .await
                 .map_err(|error| classify_hid_error(error, "keyboard_input"))?;
-            cleanup.pressed_keys = next;
         }
         KeyboardIntent::Up { usage, modifiers } => {
             if next.get(&usage) != Some(&modifiers) {
@@ -519,10 +586,11 @@ pub(super) async fn handle_keyboard_intent_with_sink(
             if next.insert(usage, modifiers).is_some() {
                 return Err(invalid_keyboard_transition());
             }
-            sink.replace(keyboard_usages(&next)?)
+            let usages = keyboard_usages(&next)?;
+            cleanup.pressed_keys = next;
+            sink.replace(usages)
                 .await
                 .map_err(|error| classify_hid_error(error, "keyboard_input"))?;
-            cleanup.pressed_keys = next;
             tokio::time::sleep(INPUT_TAP_HOLD).await;
             sink.replace(keyboard_usages(&previous)?)
                 .await
@@ -573,10 +641,12 @@ pub(super) async fn handle_hardware_button_with_sink(
     };
     match intent.phase {
         DhButtonPhase::Down => {
+            if !cleanup.pressed_buttons.contains(&button) {
+                cleanup.pressed_buttons.push(button);
+            }
             sink.send(button, ButtonState::Down)
                 .await
                 .map_err(|error| classify_hid_error(error, "hardware_button_input"))?;
-            cleanup.pressed_buttons.push(button);
         }
         DhButtonPhase::Up | DhButtonPhase::Cancel => {
             let state = if intent.phase == DhButtonPhase::Up {
@@ -590,10 +660,12 @@ pub(super) async fn handle_hardware_button_with_sink(
             remove_last_button(&mut cleanup.pressed_buttons, button);
         }
         DhButtonPhase::Tap => {
+            if !cleanup.pressed_buttons.contains(&button) {
+                cleanup.pressed_buttons.push(button);
+            }
             sink.send(button, ButtonState::Down)
                 .await
                 .map_err(|error| classify_hid_error(error, "hardware_button_input"))?;
-            cleanup.pressed_buttons.push(button);
             tokio::time::sleep(hardware_button_tap_hold(button)).await;
             sink.send(button, ButtonState::Up)
                 .await
@@ -639,11 +711,11 @@ async fn handle_control_command(
                     cleanup.touch_active = false;
                 }
                 TouchIntent::Down { x, y } => {
+                    cleanup.touch_active = true;
                     universal_hid
                         .send_touch(TouchEvent::Down(TouchPoint::new(x, y)), None)
                         .await
                         .map_err(|error| classify_hid_error(error, "touch_input"))?;
-                    cleanup.touch_active = true;
                 }
                 TouchIntent::Move { x, y } => {
                     universal_hid
