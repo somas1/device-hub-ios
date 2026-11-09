@@ -158,8 +158,19 @@ stays until Retry, and Retry replays nothing. A release arriving during
 shutdown must join that shutdown's cleanup, with exact no-duplicate send and
 cancel counts, and a successful cleanup must close without an error. These are
 synthetic tests: they prove local reporting and fail-closed behavior, not that
-a device physically released input, and they do not cover the Rust worker's
-final-shutdown gap described in `Docs/Architecture.md`.
+a device physically released input.
+
+The Rust suite covers the worker side with Tokio's paused clock. It injects a
+release I/O failure and a socket that never completes, and checks the existing
+three-second cleanup deadline. Ready-loop tests partially write and then stall
+touch and button down and tap commands, cancel, and require bounded
+unconfirmed cleanup, closed input readiness, and no later queued write.
+Keyboard tests keep possibly delivered key state after their write is dropped,
+and a failed release followed by a stalled one must keep the first failure.
+Session tests cover kept cleanup failures through cancellation and its error
+out, repeated cancel and free, and repeated cancellation after a worker panic
+or with no callback dispatcher. Like the Swift tests, these do not show that a
+device physically released input.
 
 ## Visual coverage
 

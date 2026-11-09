@@ -19,6 +19,7 @@ fn gate_fixture() -> (
         sender: event_sender,
         terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
         ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
     };
     let (sender, receiver) = mpsc::channel(4);
     let pending = Arc::new(AtomicU64::new(0));
@@ -135,6 +136,7 @@ fn worker_completion_cannot_overwrite_a_winning_cancellation() {
         sender,
         terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
         ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
     };
     let lifecycle = AtomicU8::new(STATE_CANCELLED);
     emitter.cancel();
@@ -365,6 +367,7 @@ fn media_flood_cannot_starve_terminal_control_delivery() {
         sender: event_sender,
         terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
         ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
     };
     let enabled = Arc::new(AtomicBool::new(true));
     let (captured_sender, captured_receiver) = sync_channel::<DhEventKind>(8);
@@ -435,6 +438,7 @@ fn terminal_cancellation_is_last_on_both_callback_planes() {
         sender: event_sender,
         terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
         ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
     };
     let enabled = Arc::new(AtomicBool::new(true));
     let (captured_sender, captured_receiver) = sync_channel::<DhEventKind>(8);
@@ -479,4 +483,291 @@ fn terminal_cancellation_is_last_on_both_callback_planes() {
     enabled.store(false, Ordering::Release);
     emitter.sender.send(EventMessage::Shutdown).unwrap();
     dispatcher.join().unwrap();
+}
+
+#[test]
+fn cancellation_returns_terminal_cleanup_failure_instead_of_invalid_state() {
+    let (sender, _) = sync_channel(8);
+    let emitter = EventEmitter {
+        sender,
+        terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
+        ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
+    };
+    let (cancel, _) = watch::channel(false);
+    let (controls, _) = mpsc::channel(1);
+    let (acknowledgements, _) = mpsc::channel(1);
+    let (start, _) = sync_channel(1);
+    let generation = DhGeneration { high: 1, low: 2 };
+    let session = Session {
+        acknowledgements,
+        callbacks_enabled: Arc::new(AtomicBool::new(false)),
+        cancel,
+        controls,
+        dispatcher: None,
+        emitter: emitter.clone(),
+        generation,
+        input_ready: Arc::new(AtomicBool::new(false)),
+        lifecycle: Arc::new(AtomicU8::new(STATE_TERMINAL)),
+        media: MediaEmitter::new(generation, None, std::ptr::null_mut()),
+        pending_request_id: Arc::new(AtomicU64::new(0)),
+        start,
+        video_control_ready: Arc::new(AtomicBool::new(false)),
+        video_negotiation_pending: Arc::new(AtomicBool::new(false)),
+        worker: StdMutex::new(None),
+    };
+    emitter.fail(PublicFailure::new(
+        "input_cleanup_timeout",
+        "input_cleanup",
+        true,
+        "Unknown release outcome.",
+    ));
+    let failure = session.cancel().unwrap_err();
+    assert_eq!(failure.stage, "input_cleanup");
+    assert_eq!(failure.code, "input_cleanup_timeout");
+    assert_eq!(session.cancel().unwrap_err().code, "input_cleanup_timeout");
+    let mut handle = Box::into_raw(Box::new(crate::abi::DhSession { inner: session }));
+    let mut error = std::ptr::null_mut();
+    // SAFETY: this test owns both live handles and all writable storage.
+    unsafe {
+        assert_ne!(crate::dh_session_cancel(handle, &mut error), DhStatus::Ok);
+        let json = std::ffi::CStr::from_ptr(crate::dh_error_json(error))
+            .to_str()
+            .unwrap();
+        assert!(json.contains("input_cleanup_timeout"));
+        assert!(json.contains("input_cleanup"));
+        crate::dh_error_free(&mut error);
+        assert!(error.is_null());
+        assert_eq!(crate::dh_session_free(&mut handle), DhStatus::Ok);
+        assert!(handle.is_null());
+    }
+}
+
+#[test]
+fn late_worker_cleanup_failure_survives_winning_cancellation() {
+    let (sender, _) = sync_channel(8);
+    let emitter = EventEmitter {
+        sender,
+        terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
+        ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
+    };
+    let (cancel, _) = watch::channel(false);
+    let (controls, _) = mpsc::channel(1);
+    let (acknowledgements, _) = mpsc::channel(1);
+    let (start, _) = sync_channel(1);
+    let generation = DhGeneration { high: 1, low: 2 };
+    let mut session = Session {
+        acknowledgements,
+        callbacks_enabled: Arc::new(AtomicBool::new(false)),
+        cancel,
+        controls,
+        dispatcher: None,
+        emitter: emitter.clone(),
+        generation,
+        input_ready: Arc::new(AtomicBool::new(false)),
+        lifecycle: Arc::new(AtomicU8::new(STATE_CANCELLED)),
+        media: MediaEmitter::new(generation, None, std::ptr::null_mut()),
+        pending_request_id: Arc::new(AtomicU64::new(0)),
+        start,
+        video_control_ready: Arc::new(AtomicBool::new(false)),
+        video_negotiation_pending: Arc::new(AtomicBool::new(false)),
+        worker: StdMutex::new(None),
+    };
+    emitter.cancel();
+    let lifecycle = Arc::clone(&session.lifecycle);
+    session.worker = StdMutex::new(Some(thread::spawn(move || {
+        settle_worker(
+            Some(Err(PublicFailure::new(
+                "input_cleanup_timeout",
+                "input_cleanup",
+                true,
+                "Unknown release outcome.",
+            ))),
+            &emitter,
+            &lifecycle,
+        );
+    })));
+    let failure = session.cancel().unwrap_err();
+    assert_eq!(failure.stage, "input_cleanup");
+    assert_eq!(failure.code, "input_cleanup_timeout");
+}
+
+#[test]
+fn cancel_joins_cleanup_even_when_dispatcher_is_unavailable() {
+    let (sender, _) = sync_channel(8);
+    let emitter = EventEmitter {
+        sender,
+        terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
+        ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
+    };
+    let (cancel, mut cancelled) = watch::channel(false);
+    let (controls, _) = mpsc::channel(1);
+    let (acknowledgements, _) = mpsc::channel(1);
+    let (start, _) = sync_channel(1);
+    let generation = DhGeneration { high: 1, low: 2 };
+    let mut session = Session {
+        acknowledgements,
+        callbacks_enabled: Arc::new(AtomicBool::new(false)),
+        cancel,
+        controls,
+        dispatcher: None,
+        emitter: emitter.clone(),
+        generation,
+        input_ready: Arc::new(AtomicBool::new(false)),
+        lifecycle: Arc::new(AtomicU8::new(STATE_RUNNING)),
+        media: MediaEmitter::new(generation, None, std::ptr::null_mut()),
+        pending_request_id: Arc::new(AtomicU64::new(0)),
+        start,
+        video_control_ready: Arc::new(AtomicBool::new(false)),
+        video_negotiation_pending: Arc::new(AtomicBool::new(false)),
+        worker: StdMutex::new(None),
+    };
+    let lifecycle = Arc::clone(&session.lifecycle);
+    session.worker = StdMutex::new(Some(thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(cancelled.changed()).unwrap();
+        settle_worker(
+            Some(Err(PublicFailure::new(
+                "input_cleanup_timeout",
+                "input_cleanup",
+                true,
+                "Unknown release outcome.",
+            ))),
+            &emitter,
+            &lifecycle,
+        );
+    })));
+    let failure = session.cancel().unwrap_err();
+    assert_eq!(failure.stage, "input_cleanup");
+    assert_eq!(failure.code, "input_cleanup_timeout");
+}
+
+#[test]
+fn worker_panic_remains_failed_on_repeated_cancel() {
+    let (sender, _) = sync_channel(8);
+    let emitter = EventEmitter {
+        sender,
+        terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
+        ordering: Arc::new(StdMutex::new(())),
+        cleanup_failure: Arc::default(),
+    };
+    let (cancel, _) = watch::channel(false);
+    let (controls, _) = mpsc::channel(1);
+    let (acknowledgements, _) = mpsc::channel(1);
+    let (start, _) = sync_channel(1);
+    let generation = DhGeneration { high: 1, low: 2 };
+    let mut session = Session {
+        acknowledgements,
+        callbacks_enabled: Arc::new(AtomicBool::new(false)),
+        cancel,
+        controls,
+        dispatcher: None,
+        emitter: emitter.clone(),
+        generation,
+        input_ready: Arc::new(AtomicBool::new(false)),
+        lifecycle: Arc::new(AtomicU8::new(STATE_TERMINAL)),
+        media: MediaEmitter::new(generation, None, std::ptr::null_mut()),
+        pending_request_id: Arc::new(AtomicU64::new(0)),
+        start,
+        video_control_ready: Arc::new(AtomicBool::new(false)),
+        video_negotiation_pending: Arc::new(AtomicBool::new(false)),
+        worker: StdMutex::new(None),
+    };
+    session.worker = StdMutex::new(Some(thread::spawn(|| {
+        panic!("synthetic cleanup worker panic")
+    })));
+    let failure = session.cancel().unwrap_err();
+    assert_eq!(failure.stage, "input_cleanup");
+    assert_eq!(failure.code, "panic");
+    assert_eq!(session.cancel().unwrap_err().code, "panic");
+}
+
+#[test]
+fn caught_input_worker_panic_survives_winning_cancellation() {
+    for input_opened in [false, true] {
+        let (sender, _) = sync_channel(8);
+        let emitter = EventEmitter {
+            sender,
+            terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
+            ordering: Arc::new(StdMutex::new(())),
+            cleanup_failure: Arc::default(),
+        };
+        let (cancel, _) = watch::channel(true);
+        let (controls, _) = mpsc::channel(1);
+        let (acknowledgements, _) = mpsc::channel(1);
+        let (start, _) = sync_channel(1);
+        let generation = DhGeneration { high: 1, low: 2 };
+        let mut session = Session {
+            acknowledgements,
+            callbacks_enabled: Arc::new(AtomicBool::new(false)),
+            cancel,
+            controls,
+            dispatcher: None,
+            emitter: emitter.clone(),
+            generation,
+            input_ready: Arc::new(AtomicBool::new(false)),
+            lifecycle: Arc::new(AtomicU8::new(STATE_CANCELLED)),
+            media: MediaEmitter::new(generation, None, std::ptr::null_mut()),
+            pending_request_id: Arc::new(AtomicU64::new(0)),
+            start,
+            video_control_ready: Arc::new(AtomicBool::new(false)),
+            video_negotiation_pending: Arc::new(AtomicBool::new(false)),
+            worker: StdMutex::new(None),
+        };
+        let lifecycle = Arc::clone(&session.lifecycle);
+        session.worker = StdMutex::new(Some(thread::spawn(move || {
+            guard_worker_panics(
+                || panic!("synthetic private worker payload"),
+                &emitter,
+                &lifecycle,
+                &AtomicBool::new(input_opened),
+            );
+        })));
+        for _ in 0..2 {
+            let result = session.cancel();
+            if input_opened {
+                let failure = result
+                    .expect_err("Caught input-worker panic must not become successful cleanup");
+                assert_eq!(failure.stage, "input_cleanup");
+                assert_eq!(failure.code, "panic");
+                assert!(!failure.message.contains("synthetic private"));
+            } else {
+                result.expect("Startup cancellation has no held input to release");
+            }
+        }
+        assert!(session.worker.lock().unwrap().is_none());
+        drop(session);
+    }
+}
+
+#[test]
+fn caught_panic_callback_keeps_first_known_cleanup_failure() {
+    let fixture = EventEmitterTestFixture::new();
+    let emitter = fixture.emitter();
+    let earlier = PublicFailure::new(
+        "input_delivery_failed",
+        "input_cleanup",
+        true,
+        "First release failed.",
+    );
+    *emitter.cleanup_failure.lock().unwrap() = Some(earlier);
+    guard_worker_panics(
+        || panic!("synthetic private panic payload"),
+        &emitter,
+        &AtomicU8::new(STATE_RUNNING),
+        &AtomicBool::new(true),
+    );
+    let EventMessage::Failed(bytes) = fixture.events.try_recv().unwrap() else {
+        panic!("Worker panic must emit the retained cleanup failure");
+    };
+    assert!(
+        bytes
+            .windows(earlier.code.len())
+            .any(|part| part == earlier.code.as_bytes())
+    );
 }

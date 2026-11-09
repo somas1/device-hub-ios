@@ -81,10 +81,23 @@ updates, selection, and Start Viewing cannot clear it, and cleanup results
 from a superseded attempt cannot change its successor. A successful cleanup
 is not proof that the device physically released input.
 
-Known gap: a release failure that happens only inside the Rust worker's final
-shutdown or cancellation can still go unreported, because the Rust layer does
-not yet keep that result for Swift. Explicit `releaseAllInput` failures and
-failures reported through the session's event stream do reach Swift.
+The Rust worker's final input cleanup returns its outcome under one total
+three-second deadline, still attempting the remaining known releases after a
+failure. The first known release failure is kept in a slot shared by the
+input cleanup state and the session's event emitter, so it survives a later
+successful release, an interrupted cleanup future, and the suppression of
+terminal callbacks during cancel and free. A cleanup failure takes priority
+over an unrelated stream failure.
+
+Cancellation races the whole ready control loop, including awaited HID,
+orientation, and media-control writes. If input was opened, the worker still
+runs its cleanup instead of being dropped. Presses that may have been
+delivered are recorded before their writes are awaited, and release state is
+cleared only after a successful release. A caught worker panic after input
+opened counts as an unknown release outcome. `dh_session_cancel` joins the
+worker and returns the kept cleanup failure through its existing status and
+error-out, also after the session has ended. `dh_session_free` proves the
+handle was destroyed, not that the device released input.
 
 ## Dependency rules
 

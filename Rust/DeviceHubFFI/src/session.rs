@@ -195,12 +195,14 @@ pub(crate) enum ControlCommand {
 pub(crate) struct ControlGate {
     receiver: mpsc::Receiver<ControlCommand>,
     input_ready: Arc<AtomicBool>,
+    cleanup_needed: Arc<AtomicBool>,
     video_control_ready: Arc<AtomicBool>,
     video_negotiation_pending: Arc<AtomicBool>,
 }
 
 impl ControlGate {
     pub(crate) fn enable_input(&self) {
+        self.cleanup_needed.store(true, Ordering::Release);
         self.input_ready.store(true, Ordering::Release);
     }
 
@@ -221,6 +223,7 @@ impl Drop for ControlGate {
 #[derive(Clone)]
 pub(crate) struct EventEmitter {
     sender: SyncSender<EventMessage>,
+    cleanup_failure: Arc<StdMutex<Option<PublicFailure>>>,
     terminal: Arc<AtomicU8>,
     ordering: Arc<StdMutex<()>>,
 }
@@ -233,6 +236,22 @@ pub(crate) struct EventEmitterTestFixture {
 }
 
 #[cfg(test)]
+/// Creates an actual control gate and exposes its input-readiness lifetime flag.
+pub(crate) fn control_gate_test_fixture()
+-> (ControlGate, mpsc::Sender<ControlCommand>, Arc<AtomicBool>) {
+    let (sender, receiver) = mpsc::channel(8);
+    let input_ready = Arc::new(AtomicBool::new(false));
+    let gate = ControlGate {
+        receiver,
+        input_ready: Arc::clone(&input_ready),
+        cleanup_needed: Arc::default(),
+        video_control_ready: Arc::default(),
+        video_negotiation_pending: Arc::default(),
+    };
+    (gate, sender, input_ready)
+}
+
+#[cfg(test)]
 impl EventEmitterTestFixture {
     /// Creates a non-dispatching control emitter with its receiver kept alive.
     pub(crate) fn new() -> Self {
@@ -242,6 +261,7 @@ impl EventEmitterTestFixture {
                 sender,
                 terminal: Arc::new(AtomicU8::new(TERMINAL_NONE)),
                 ordering: Arc::new(StdMutex::new(())),
+                cleanup_failure: Arc::default(),
             },
             events,
         }
@@ -259,6 +279,10 @@ impl EventEmitterTestFixture {
 }
 
 impl EventEmitter {
+    pub(crate) fn cleanup_failure_slot(&self) -> Arc<StdMutex<Option<PublicFailure>>> {
+        Arc::clone(&self.cleanup_failure)
+    }
+
     fn send(&self, event: EventMessage) -> Result<(), PublicFailure> {
         let _ordering = self.ordering.lock().map_err(|_| {
             PublicFailure::new(
@@ -359,6 +383,16 @@ impl EventEmitter {
     }
 
     fn fail(&self, failure: PublicFailure) {
+        // Reporting survives terminal callback suppression during cancel/free.
+        if failure.stage == "input_cleanup" {
+            let mut retained = self
+                .cleanup_failure
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if retained.is_none() {
+                *retained = Some(failure);
+            }
+        }
         let wire = FailureWire {
             code: failure.code,
             stage: failure.stage,
@@ -621,7 +655,7 @@ pub(crate) struct Session {
     start: SyncSender<StartCommand>,
     video_control_ready: Arc<AtomicBool>,
     video_negotiation_pending: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    worker: StdMutex<Option<JoinHandle<()>>>,
 }
 
 impl Session {
@@ -647,6 +681,7 @@ impl Session {
             sender: event_sender,
             terminal,
             ordering: Arc::new(StdMutex::new(())),
+            cleanup_failure: Arc::default(),
         };
         let media = MediaEmitter::new(generation, media_callback, media_callback_context);
         let worker_media = media.clone();
@@ -683,6 +718,7 @@ impl Session {
         let control_gate = ControlGate {
             receiver: control_receiver,
             input_ready: Arc::clone(&input_ready),
+            cleanup_needed: Arc::new(AtomicBool::new(false)),
             video_control_ready: Arc::clone(&video_control_ready),
             video_negotiation_pending: Arc::clone(&video_negotiation_pending),
         };
@@ -701,33 +737,26 @@ impl Session {
             .spawn(move || {
                 let panic_emitter = worker_emitter.clone();
                 let panic_lifecycle = Arc::clone(&worker_lifecycle);
-                if crate::catch_sanitized_unwind(|| {
-                    run_worker(
-                        start_receiver,
-                        cancel_receiver,
-                        WorkerContext {
-                            operation,
-                            emitter: worker_emitter,
-                            media: worker_media,
-                            persistence: gate,
-                            controls: control_gate,
-                            lifecycle: worker_lifecycle,
-                        },
-                    );
-                })
-                .is_err()
-                {
-                    settle_worker(
-                        Some(Err(PublicFailure::new(
-                            "panic",
-                            "session_dispatch",
-                            false,
-                            "The native protocol worker failed unexpectedly.",
-                        ))),
-                        &panic_emitter,
-                        &panic_lifecycle,
-                    );
-                }
+                let panic_cleanup_needed = Arc::clone(&control_gate.cleanup_needed);
+                guard_worker_panics(
+                    || {
+                        run_worker(
+                            start_receiver,
+                            cancel_receiver,
+                            WorkerContext {
+                                operation,
+                                emitter: worker_emitter,
+                                media: worker_media,
+                                persistence: gate,
+                                controls: control_gate,
+                                lifecycle: worker_lifecycle,
+                            },
+                        );
+                    },
+                    &panic_emitter,
+                    &panic_lifecycle,
+                    &panic_cleanup_needed,
+                );
             }) {
             Ok(worker) => worker,
             Err(_) => {
@@ -757,7 +786,7 @@ impl Session {
             start,
             video_control_ready,
             video_negotiation_pending,
-            worker: Some(worker),
+            worker: StdMutex::new(Some(worker)),
         })
     }
 
@@ -811,7 +840,7 @@ impl Session {
                         self.video_control_ready.store(false, Ordering::Release);
                         self.video_negotiation_pending
                             .store(false, Ordering::Release);
-                        return Ok(());
+                        return self.join_cleanup();
                     }
                 }
                 STATE_RUNNING => {
@@ -833,11 +862,11 @@ impl Session {
                             .store(false, Ordering::Release);
                         let _ = self.cancel.send(true);
                         self.emitter.cancel();
-                        self.emitter.drain()?;
-                        return Ok(());
+                        let dispatch_result = self.emitter.drain();
+                        return self.join_cleanup().and(dispatch_result);
                     }
                 }
-                STATE_CANCELLED => return Ok(()),
+                STATE_CANCELLED | STATE_TERMINAL => return self.join_cleanup(),
                 _ => {
                     return Err(PublicFailure::new(
                         "invalid_state",
@@ -847,6 +876,39 @@ impl Session {
                     ));
                 }
             }
+        }
+    }
+
+    fn join_cleanup(&self) -> Result<(), PublicFailure> {
+        // The worker owns the existing total cleanup deadline. Taking and joining
+        // it under one lock also gives concurrent/repeated cancellation one result.
+        let mut worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(worker) = worker.take() {
+            if worker.join().is_err() {
+                let mut retained = self
+                    .emitter
+                    .cleanup_failure
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                retained.get_or_insert(PublicFailure::new(
+                    "panic",
+                    "input_cleanup",
+                    false,
+                    "Native input release outcome is unknown.",
+                ));
+            }
+        }
+        match *self
+            .emitter
+            .cleanup_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            Some(failure) => Err(failure),
+            None => Ok(()),
         }
     }
 
@@ -1095,6 +1157,8 @@ impl Session {
 
         let worker_ok = self
             .worker
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take()
             .is_none_or(|worker| worker.join().is_ok());
         let _ = self.emitter.sender.send(EventMessage::Shutdown);
@@ -1121,6 +1185,37 @@ struct WorkerContext {
     persistence: PersistenceGate,
     controls: ControlGate,
     lifecycle: Arc<AtomicU8>,
+}
+
+fn guard_worker_panics(
+    work: impl FnOnce(),
+    emitter: &EventEmitter,
+    lifecycle: &AtomicU8,
+    cleanup_needed: &AtomicBool,
+) {
+    if crate::catch_sanitized_unwind(work).is_err() {
+        // A caught panic joins normally. Retain its unconfirmed release outcome
+        // before lifecycle/callback suppression can discard the failure.
+        let input_opened = cleanup_needed.load(Ordering::Acquire);
+        settle_worker(
+            Some(Err(PublicFailure::new(
+                "panic",
+                if input_opened {
+                    "input_cleanup"
+                } else {
+                    "session_dispatch"
+                },
+                false,
+                if input_opened {
+                    "Native input release outcome is unknown."
+                } else {
+                    "The native protocol worker failed unexpectedly."
+                },
+            ))),
+            emitter,
+            lifecycle,
+        );
+    }
 }
 
 fn run_worker(
@@ -1178,14 +1273,22 @@ fn run_worker(
             if matches!(&operation.mode, crate::model::RemoteMode::ControlStream)
     );
     let result = if is_control_stream {
-        Some(runtime.block_on(crate::protocol::run(
-            operation,
-            emitter.clone(),
-            media.clone(),
-            persistence,
-            controls,
-            Some(cancellation),
-        )))
+        let cleanup_needed = Arc::clone(&controls.cleanup_needed);
+        let stream_cancellation = cancellation.clone();
+        runtime.block_on(async {
+            if *cancellation.borrow() { return None; }
+            let operation = crate::protocol::run(operation, emitter.clone(), media.clone(), persistence, controls, Some(stream_cancellation));
+            tokio::pin!(operation);
+            tokio::select! {
+                biased;
+                _ = cancellation.changed() => {
+                    // Startup has no held input. Once input opened, dropping
+                    // the future would skip its bounded release epilogue.
+                    if cleanup_needed.load(Ordering::Acquire) { Some(operation.await) } else { None }
+                }
+                result = &mut operation => Some(result),
+            }
+        })
     } else {
         runtime.block_on(async {
             tokio::select! {
@@ -1214,9 +1317,18 @@ fn settle_worker(
     emitter: &EventEmitter,
     lifecycle: &AtomicU8,
 ) {
-    let Some(result) = result else {
+    let Some(mut result) = result else {
         return;
     };
+    if let Err(failure) = &result {
+        if failure.stage == "input_cleanup" {
+            let mut retained = emitter
+                .cleanup_failure
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            result = Err(*retained.get_or_insert(*failure));
+        }
+    }
     if lifecycle
         .compare_exchange(
             STATE_RUNNING,
