@@ -65,6 +65,15 @@ does not skip the disconnect, and a replacement session cannot connect until
 the previous close has settled. Only an explicit Retry acknowledges a failed
 outcome and creates fresh ownership; no old commands or contacts carry over.
 
+That shared task runs inside protected background time
+(`BackgroundExecutionClient`), so every close path, including leaving the
+foreground and a connection cancelled by backgrounding, can finish releasing
+input and disconnecting before iOS suspends the app. The app installs a
+UIKit background task that ends when the work finishes or when iOS signals
+that background time is expiring; elsewhere the client just runs the work.
+Protection keeps the process running; it does not change the reported
+outcome, and expiry before the work finishes is not detected.
+
 A terminal release joins its transport owner's complete cleanup task,
 including native cancellation and device-claim release, instead of sending a
 new command to a closed lane. The session control keeps an explicit settled
