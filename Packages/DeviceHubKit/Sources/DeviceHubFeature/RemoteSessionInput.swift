@@ -122,7 +122,10 @@ extension RemoteSessionFeature {
             let ownsPending = pending?.attemptID == attemptID && pending?.sessionID == sessionID
             let ownsLive = state.session?.attemptID == attemptID
                 && (sessionID == nil || state.session?.sessionID == sessionID)
-            guard ownsLive || (ownsPending && state.session == nil) else { return .none }
+            // An ended session stays visible without its transport identity;
+            // its pending cleanup owner still carries that identity.
+            let ownsEnded = ownsPending && (state.session == nil || state.session?.attemptID == attemptID)
+            guard ownsLive || ownsEnded else { return .none }
             let session = state.session
             state.activeContactIDs.removeAll()
             state.session = nil
