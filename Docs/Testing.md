@@ -27,6 +27,11 @@ gate runs SwiftFormat, SwiftLint, ShellCheck, jscpd, Periphery, Rust tests,
 Swift package tests, protocol verification, previews, and the unsigned Release
 build. Heavy builds and simulator-bound verification run serially.
 
+`mise run format:check` passes SwiftFormat the tracked Swift files by name.
+SwiftFormat skips files that carry the macOS hidden flag when it scans a
+folder, and files in some checkouts (for example under `.worktrees/`) can end
+up with that flag. The check fails if no files were checked.
+
 ## Simulator ownership
 
 `mise run test:app`, `mise run test:media`, and snapshot recording each own one
