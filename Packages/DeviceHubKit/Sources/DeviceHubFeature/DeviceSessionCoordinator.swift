@@ -1,3 +1,4 @@
+import Dependencies
 import DeviceHubClient
 import DeviceHubCore
 import Foundation
@@ -78,19 +79,26 @@ actor DeviceSessionCoordinator {
         }
         guard let owned = activeSession, owned.attemptID == attemptID else { return }
         activeSession = nil
+        // Read at call time so the caller's dependencies (the app's UIKit
+        // background task) apply; release and disconnect must still reach
+        // the device if iOS suspends the app right after it leaves the
+        // foreground.
+        @Dependency(\.backgroundExecution) var backgroundExecution
         let task = Task<Void, Error> {
-            var failure = owned.cleanupFailure
-            do {
-                try await owned.session.command(.releaseAllInput)
-            } catch {
-                failure = failure ?? .inputCleanupFailed
+            let failure = LockIsolated(owned.cleanupFailure)
+            await backgroundExecution.protect("close-remote-session") {
+                do {
+                    try await owned.session.command(.releaseAllInput)
+                } catch {
+                    failure.withValue { $0 = $0 ?? .inputCleanupFailed }
+                }
+                do {
+                    try await owned.session.disconnect()
+                } catch {
+                    failure.withValue { $0 = $0 ?? .inputCleanupFailed }
+                }
             }
-            do {
-                try await owned.session.disconnect()
-            } catch {
-                failure = failure ?? .inputCleanupFailed
-            }
-            if let failure {
+            if let failure = failure.value {
                 throw failure
             }
         }
