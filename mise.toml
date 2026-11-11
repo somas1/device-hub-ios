@@ -88,7 +88,7 @@ run = [
 
 [tasks."format:check"]
 description = "Check Swift formatting"
-run = "swiftformat Packages Sources Tools --config .swiftformat --lint"
+run = "Scripts/format-check.sh"
 
 [tasks."lint:swift"]
 description = "Lint Swift source"
