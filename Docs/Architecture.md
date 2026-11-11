@@ -90,6 +90,13 @@ updates, selection, and Start Viewing cannot clear it, and cleanup results
 from a superseded attempt cannot change its successor. A successful cleanup
 is not proof that the device physically released input.
 
+When a session ends (its event stream finishes or fails, or an update ends
+it), the feature hands its cleanup to the coordinator and then drops the
+visible session's transport identity. Late frames, updates, and command
+results from the closed session no longer match it, so they cannot clear its
+terminal error or re-enable input; the cleanup owner keeps the identity, so
+that session's cleanup outcome is still reported.
+
 The Rust worker's final input cleanup returns its outcome under one total
 three-second deadline, still attempting the remaining known releases after a
 failure. The first known release failure is kept in a slot shared by the

@@ -292,15 +292,6 @@ struct RemoteSessionFeatureTests {
             device: device,
             receivedAt: time
         )
-        let store = TestStore(
-            initialState: RemoteSessionFeature.State(
-                roster: DeviceRoster(devices: [device]),
-                selectedDeviceID: device.id,
-                session: current
-            )
-        ) {
-            RemoteSessionFeature()
-        }
         let sessionID = try #require(current.sessionID)
         let errors: [DeviceHubError] = [
             .localNetworkDenied,
@@ -313,7 +304,17 @@ struct RemoteSessionFeatureTests {
             .mediaStalled
         ]
 
+        // Each failure ends its session, so each error needs its own session.
         for error in errors {
+            let store = TestStore(
+                initialState: RemoteSessionFeature.State(
+                    roster: DeviceRoster(devices: [device]),
+                    selectedDeviceID: device.id,
+                    session: current
+                )
+            ) {
+                RemoteSessionFeature()
+            }
             await store.send(
                 .sessionStreamFailed(
                     attemptID: current.attemptID,
@@ -322,10 +323,11 @@ struct RemoteSessionFeatureTests {
                 )
             ) {
                 $0.remediation = DeviceHubRemediation(error: error)
+                var ended = current
+                ended.connectionError = error
+                $0.pendingInputCleanup = InputCleanupOwnership(session: ended)
                 $0.session?.connectionError = error
-                if let session = $0.session {
-                    $0.pendingInputCleanup = InputCleanupOwnership(session: session)
-                }
+                $0.session?.sessionID = nil
             }
             await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
         }

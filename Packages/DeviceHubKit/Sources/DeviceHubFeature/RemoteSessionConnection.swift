@@ -34,10 +34,7 @@ extension RemoteSessionFeature {
                 error: .connectionLost
             )
             state.session = session
-            return .concatenate(
-                closeSessionEffect(session: session, state: &state),
-                cancelSessionEffects()
-            )
+            return endSession(session, state: &state)
 
         case let .sessionStreamFailed(attemptID, sessionID, error):
             guard var session = state.session,
@@ -56,10 +53,7 @@ extension RemoteSessionFeature {
             state.activeContactIDs.removeAll()
             state.remediation = DeviceHubRemediation(error: error)
             state.session = session
-            return .concatenate(
-                closeSessionEffect(session: session, state: &state),
-                cancelSessionEffects()
-            )
+            return endSession(session, state: &state)
 
         case let .sessionUpdateReceived(attemptID, sessionID, update):
             return handleSessionUpdate(
@@ -172,10 +166,7 @@ extension RemoteSessionFeature {
 
         if update.event.endsSession {
             state.activeContactIDs.removeAll()
-            return .concatenate(
-                closeSessionEffect(session: session, state: &state),
-                cancelSessionEffects()
-            )
+            return endSession(session, state: &state)
         }
         guard wasAcceptingInput, !session.acceptsInput else {
             return .none
@@ -188,6 +179,19 @@ extension RemoteSessionFeature {
             revokeInput(state: &state),
             .cancel(id: CancelID.commands)
         )
+    }
+
+    /// Hands the ended session's cleanup to the coordinator, then drops its
+    /// transport identity so late frames, updates, and command results from
+    /// it no longer match and cannot clear its terminal error or re-enable
+    /// input. Cleanup ownership keeps the identity for the outcome.
+    private func endSession(
+        _ session: ActiveRemoteSession,
+        state: inout State
+    ) -> Effect<Action> {
+        let close = closeSessionEffect(session: session, state: &state)
+        state.session?.sessionID = nil
+        return .concatenate(close, cancelSessionEffects())
     }
 
     private func updateState(
