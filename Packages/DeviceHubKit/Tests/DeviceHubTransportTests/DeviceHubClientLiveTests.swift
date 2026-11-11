@@ -403,7 +403,6 @@ struct BonjourClientProbe: Sendable {
             releaseDevice: { deviceID in
                 await operations?.append(.availabilityReleased(deviceID))
             },
-            stopAvailability: {},
             stopPairingAdvertisement: {
                 await operations?.append(.advertisementStopped)
             },
