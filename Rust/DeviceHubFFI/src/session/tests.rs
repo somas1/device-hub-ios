@@ -295,9 +295,11 @@ impl Default for BlockingCapture {
 unsafe extern "C" fn blocking_media_event(_event: *const DhEvent, context: *mut c_void) {
     // SAFETY: Tests pass a live `BlockingCapture` as callback context.
     let capture = unsafe { &*(context.cast::<BlockingCapture>()) };
+    // Publish `entered` under the lock so the waiting test cannot miss the
+    // notification between checking the flag and starting to wait.
+    let mut guard = capture.lock.lock().unwrap();
     capture.entered.store(true, Ordering::Release);
     capture.signal.notify_all();
-    let mut guard = capture.lock.lock().unwrap();
     while !capture.release.load(Ordering::Acquire) {
         guard = capture.signal.wait(guard).unwrap();
     }
@@ -340,7 +342,10 @@ fn disabling_media_waits_for_inflight_callback_and_prevents_later_callbacks() {
             .is_err()
     );
 
-    capture.release.store(true, Ordering::Release);
+    {
+        let _guard = capture.lock.lock().unwrap();
+        capture.release.store(true, Ordering::Release);
+    }
     capture.signal.notify_all();
     disabled_receiver
         .recv_timeout(Duration::from_secs(1))
