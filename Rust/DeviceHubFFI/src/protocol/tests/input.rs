@@ -112,9 +112,14 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
     };
     let mut button_cleanup = InputCleanupState::default();
     let mut button = MockHardwareButtonSink::default();
-    handle_hardware_button_with_sink(intent, &mut button_cleanup, &mut button)
-        .await
-        .unwrap();
+    handle_hardware_button_with_sink(
+        intent,
+        DhOrientation::Portrait,
+        &mut button_cleanup,
+        &mut button,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         button.attempts,
         vec![
@@ -129,10 +134,14 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
         fail_at: Some(2),
         ..Default::default()
     };
-    let failure =
-        handle_hardware_button_with_sink(intent, &mut failed_button_cleanup, &mut failed_button)
-            .await
-            .unwrap_err();
+    let failure = handle_hardware_button_with_sink(
+        intent,
+        DhOrientation::Portrait,
+        &mut failed_button_cleanup,
+        &mut failed_button,
+    )
+    .await
+    .unwrap_err();
     assert_eq!(failure.code, "input_delivery_failed");
     assert_eq!(
         failed_button.attempts,
@@ -636,4 +645,140 @@ fn first_release_failure_outlives_unwound_protocol_future() {
         retained.as_ref().map(|failure| failure.code),
         Some("input_delivery_failed")
     );
+}
+
+fn button_intent(
+    button: DhHardwareButton,
+    phase: DhButtonPhase,
+) -> crate::model::HardwareButtonIntent {
+    crate::model::HardwareButtonIntent { button, phase }
+}
+
+#[tokio::test]
+async fn volume_taps_swap_physical_buttons_only_when_upside_down() {
+    use HardwareButton::{Home, VolumeDown, VolumeUp};
+    for (button, orientation, sent) in [
+        (
+            DhHardwareButton::VolumeUp,
+            DhOrientation::Portrait,
+            VolumeUp,
+        ),
+        (
+            DhHardwareButton::VolumeUp,
+            DhOrientation::LandscapeLeft,
+            VolumeUp,
+        ),
+        (
+            DhHardwareButton::VolumeUp,
+            DhOrientation::LandscapeRight,
+            VolumeUp,
+        ),
+        (
+            DhHardwareButton::VolumeUp,
+            DhOrientation::PortraitUpsideDown,
+            VolumeDown,
+        ),
+        (
+            DhHardwareButton::VolumeDown,
+            DhOrientation::Portrait,
+            VolumeDown,
+        ),
+        (
+            DhHardwareButton::VolumeDown,
+            DhOrientation::PortraitUpsideDown,
+            VolumeUp,
+        ),
+        (
+            DhHardwareButton::Home,
+            DhOrientation::PortraitUpsideDown,
+            Home,
+        ),
+    ] {
+        let mut cleanup = InputCleanupState::default();
+        let mut sink = MockHardwareButtonSink::default();
+        handle_hardware_button_with_sink(
+            button_intent(button, DhButtonPhase::Tap),
+            orientation,
+            &mut cleanup,
+            &mut sink,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            sink.attempts,
+            vec![(sent, ButtonState::Down), (sent, ButtonState::Up)],
+            "{button:?} while {orientation:?}"
+        );
+        assert!(cleanup.pressed_buttons.is_empty());
+    }
+}
+
+#[test]
+fn volume_orientation_comes_from_the_live_query_and_falls_back_unswapped() {
+    let state = |orientation, non_flat_orientation| OrientationState {
+        orientation,
+        non_flat_orientation,
+        locked: false,
+    };
+    let upside_down = state(
+        Orientation::PortraitUpsideDown,
+        Orientation::PortraitUpsideDown,
+    );
+    let flat_after_upside_down = state(Orientation::FaceUp, Orientation::PortraitUpsideDown);
+    let landscape = state(Orientation::LandscapeLeft, Orientation::LandscapeLeft);
+    let flat_unknown = state(Orientation::FaceUp, Orientation::FaceDown);
+    assert_eq!(
+        volume_orientation(Some(&upside_down)),
+        DhOrientation::PortraitUpsideDown
+    );
+    assert_eq!(
+        volume_orientation(Some(&flat_after_upside_down)),
+        DhOrientation::PortraitUpsideDown
+    );
+    assert_eq!(
+        volume_orientation(Some(&landscape)),
+        DhOrientation::LandscapeLeft
+    );
+    assert_eq!(
+        volume_orientation(Some(&flat_unknown)),
+        DhOrientation::Portrait
+    );
+    assert_eq!(volume_orientation(None), DhOrientation::Portrait);
+}
+
+#[tokio::test]
+async fn volume_release_after_turning_lets_go_of_the_button_that_was_pressed() {
+    for release in [DhButtonPhase::Up, DhButtonPhase::Cancel] {
+        let mut cleanup = InputCleanupState::default();
+        let mut sink = MockHardwareButtonSink::default();
+        handle_hardware_button_with_sink(
+            button_intent(DhHardwareButton::VolumeUp, DhButtonPhase::Down),
+            DhOrientation::PortraitUpsideDown,
+            &mut cleanup,
+            &mut sink,
+        )
+        .await
+        .unwrap();
+        handle_hardware_button_with_sink(
+            button_intent(DhHardwareButton::VolumeUp, release),
+            DhOrientation::Portrait,
+            &mut cleanup,
+            &mut sink,
+        )
+        .await
+        .unwrap();
+        let released = if release == DhButtonPhase::Up {
+            ButtonState::Up
+        } else {
+            ButtonState::Canceled
+        };
+        assert_eq!(
+            sink.attempts,
+            vec![
+                (HardwareButton::VolumeDown, ButtonState::Down),
+                (HardwareButton::VolumeDown, released),
+            ]
+        );
+        assert!(cleanup.pressed_buttons.is_empty());
+    }
 }

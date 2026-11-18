@@ -628,6 +628,7 @@ impl HardwareButtonSink for IndigoHidClient<Box<dyn idevice::ReadWrite>> {
 
 pub(super) async fn handle_hardware_button_with_sink(
     intent: crate::model::HardwareButtonIntent,
+    orientation: DhOrientation,
     cleanup: &mut InputCleanupState,
     sink: &mut impl HardwareButtonSink,
 ) -> Result<(), PublicFailure> {
@@ -639,6 +640,7 @@ pub(super) async fn handle_hardware_button_with_sink(
         DhHardwareButton::Mute => HardwareButton::Mute,
         DhHardwareButton::Siri => HardwareButton::Siri,
     };
+    let button = physical_button(button, intent.phase, orientation, &cleanup.pressed_buttons);
     match intent.phase {
         DhButtonPhase::Down => {
             if !cleanup.pressed_buttons.contains(&button) {
@@ -674,6 +676,45 @@ pub(super) async fn handle_hardware_button_with_sink(
         }
     }
     Ok(())
+}
+
+/// iPadOS swaps the physical volume buttons while the iPad is upside down, so
+/// the other one is sent to keep Volume Up raising the volume. A release goes
+/// to the physical button its press used, even if the iPad turned in between.
+fn physical_button(
+    button: HardwareButton,
+    phase: DhButtonPhase,
+    orientation: DhOrientation,
+    pressed: &[HardwareButton],
+) -> HardwareButton {
+    let other = match button {
+        HardwareButton::VolumeUp => HardwareButton::VolumeDown,
+        HardwareButton::VolumeDown => HardwareButton::VolumeUp,
+        _ => return button,
+    };
+    let (oriented, unoriented) = if orientation == DhOrientation::PortraitUpsideDown {
+        (other, button)
+    } else {
+        (button, other)
+    };
+    let releasing = matches!(phase, DhButtonPhase::Up | DhButtonPhase::Cancel);
+    if releasing && !pressed.contains(&oriented) && pressed.contains(&unoriented) {
+        unoriented
+    } else {
+        oriented
+    }
+}
+
+/// Orientation that picks the physical volume button. The video geometry only
+/// refreshes on a new encoder configuration, which turning the iPad upside
+/// down does not produce, so volume presses ask the orientation service.
+/// Without an answer the button is sent unswapped rather than failing.
+pub(super) fn volume_orientation(state: Option<&OrientationState>) -> DhOrientation {
+    state
+        .and_then(|state| {
+            effective_orientation(&state.orientation, &state.non_flat_orientation).ok()
+        })
+        .unwrap_or(DhOrientation::Portrait)
 }
 
 fn remove_last_button(buttons: &mut Vec<HardwareButton>, button: HardwareButton) {
@@ -748,7 +789,28 @@ async fn handle_control_command(
             handle_keyboard_intent_with_sink(intent, cleanup, &mut sink).await
         }
         ControlCommand::HardwareButton(intent) => {
-            handle_hardware_button_with_sink(intent, cleanup, indigo_hid).await
+            let is_volume = matches!(
+                intent.button,
+                DhHardwareButton::VolumeUp | DhHardwareButton::VolumeDown
+            );
+            let state = if is_volume {
+                stage(
+                    INPUT_TIMEOUT,
+                    orientation_state_failed(),
+                    orientation.current_orientation(),
+                )
+                .await
+                .ok()
+            } else {
+                None
+            };
+            handle_hardware_button_with_sink(
+                intent,
+                volume_orientation(state.as_ref()),
+                cleanup,
+                indigo_hid,
+            )
+            .await
         }
         ControlCommand::Rotate(intent) => {
             let direction = match intent {

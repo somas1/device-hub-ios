@@ -153,6 +153,11 @@ visible, typed failure rather than an implicit mounting flow.
 - Touch and the stateful virtual keyboard use UniversalHID. Hardware buttons
   use Indigo. Keyboard chords update one UniversalHID usage bitmap, and
   cancellation clears the complete bitmap before teardown.
+- iPadOS swaps the physical volume buttons while the iPad is upside down, so
+  Volume Up and Volume Down are sent as the other physical button in that
+  orientation, asked from the orientation service at each volume press (the
+  video geometry does not change on a 180° turn). A release always goes
+  to the physical button its press used, even if the iPad turned in between.
 - A successful write is not treated as proof that an input landed; real-device
   validation must observe the target.
 - Media teardown always names this app's session UUID. The upstream
