@@ -77,15 +77,23 @@ struct RemoteSessionMenu: View {
 
             if acceptsInput {
                 Section("Hardware") {
-                    Button("Volume Up", systemImage: "speaker.plus") {
-                        buttonTapped(.volumeUp)
+                    // Volume and Mute keep the menu open so repeated taps
+                    // don't need the menu reopened each time.
+                    Group {
+                        Button("Volume Up", systemImage: "speaker.plus") {
+                            buttonTapped(.volumeUp)
+                        }
+                        Button("Volume Down", systemImage: "speaker.minus") {
+                            buttonTapped(.volumeDown)
+                        }
+                        Button("Mute", systemImage: "speaker.slash") {
+                            buttonTapped(.mute)
+                        }
                     }
-                    Button("Volume Down", systemImage: "speaker.minus") {
-                        buttonTapped(.volumeDown)
-                    }
-                    Button("Mute", systemImage: "speaker.slash") {
-                        buttonTapped(.mute)
-                    }
+                    #if !os(macOS)
+                    // Unavailable on macOS, where the package's tests build.
+                    .menuActionDismissBehavior(.disabled)
+                    #endif
                     Button("Siri", systemImage: "waveform") {
                         buttonTapped(.siri)
                     }

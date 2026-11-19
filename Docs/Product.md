@@ -55,8 +55,10 @@ The More menu stays close to the top-right corner and contains:
 4. Rotate
 
 Secondary hardware controls, device selection, pairing, reconnect, and
-stop-viewing live in the same menu. There is no bottom action bar or trailing
-control rail. The remote canvas has no app-added padding.
+stop-viewing live in the same menu. Volume Up, Volume Down and Mute leave the
+menu open after a tap, so the volume can be stepped repeatedly without
+reopening it. There is no bottom action bar or trailing control rail. The
+remote canvas has no app-added padding.
 
 ## Platform adaptation
 
