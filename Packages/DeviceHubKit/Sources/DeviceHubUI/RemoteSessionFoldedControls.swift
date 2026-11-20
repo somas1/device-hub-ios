@@ -100,6 +100,7 @@ struct RemoteSessionFoldedControls: View {
                     menu: RemoteSessionMenu(
                         acceptsInput: true,
                         isViewingStopped: false,
+                        canStartViewing: false,
                         hasActiveSession: true,
                         devices: [],
                         selectedDeviceID: nil,

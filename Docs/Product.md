@@ -55,6 +55,12 @@ There is no dashboard and no Devices, Control, Logs, or Settings tab bar.
   when the scene deactivates or the window resigns key. Paste is refused unless
   the on-screen keyboard is shown; then it types the clipboard to the device.
 
+After Stop Viewing, choosing or pairing a device, returning to the app, and
+using Retry leave viewing stopped. Start Viewing is available when the app
+is active, a paired device is selected, any input cleanup has finished, and
+any cleanup failure has been acknowledged. Starting with an offline paired
+device allows it to connect when it returns.
+
 ## Primary controls
 
 The More menu stays close to the top-right corner and contains:

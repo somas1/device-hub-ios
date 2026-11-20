@@ -133,6 +133,12 @@ For a reproducible defect:
 Prefer real fixtures and temporary directories. Stub live network and device
 services only where deterministic tests cannot own them.
 
+`RemoteSessionStopPolicyTests` covers roster and selection changes, pairing,
+Retry, lifecycle, and cleanup around Stop Viewing. It verifies that an
+eligible explicit Start can connect when an offline target returns.
+`RemoteCanvasStopPresentationTests` checks the stopped placeholder copy and
+when it offers Start.
+
 ## Protocol coverage
 
 The protocol suites should prove that:

@@ -8,6 +8,9 @@ struct RemoteCanvas: View {
     let device: DeviceSummary?
     let frame: RemoteDisplayFrame?
     let isViewingStopped: Bool
+    let canStartViewing: Bool
+    let isInputCleanupPending: Bool
+    let isInputCleanupFailed: Bool
     let presentation: RemoteSessionPresentation?
     let remediation: DeviceHubRemediation?
     let pairButtonTapped: () -> Void
@@ -57,9 +60,15 @@ struct RemoteCanvas: View {
     @ViewBuilder
     private var canvasPlaceholder: some View {
         if isViewingStopped {
+            let content = Self.stoppedViewingContent(
+                canStartViewing: canStartViewing,
+                isInputCleanupPending: isInputCleanupPending,
+                isInputCleanupFailed: isInputCleanupFailed,
+                pairingState: device?.pairingState
+            )
             CanvasMessage(
-                actionTitle: "Start Viewing",
-                message: "The secure remote session is stopped.",
+                actionTitle: content.actionTitle,
+                message: content.message,
                 symbolName: "pause.circle",
                 title: "Viewing Stopped",
                 action: startViewingButtonTapped
@@ -98,6 +107,26 @@ struct RemoteCanvas: View {
                 action: pairButtonTapped
             )
         }
+    }
+
+    static func stoppedViewingContent(
+        canStartViewing: Bool,
+        isInputCleanupPending: Bool,
+        isInputCleanupFailed: Bool,
+        pairingState: DevicePairingState?
+    ) -> (message: String, actionTitle: String?) {
+        let message = if isInputCleanupPending {
+            "Viewing is paused. Waiting for input cleanup to finish."
+        } else if isInputCleanupFailed {
+            "Viewing is paused. Input release is unconfirmed; check the device before trying again."
+        } else if pairingState == nil {
+            "Choose or pair a device before resuming."
+        } else if pairingState == .requiresPairing {
+            "Pair this device, then choose Start Viewing to resume."
+        } else {
+            "Viewing stays paused until you choose Start Viewing. The device must be available to connect."
+        }
+        return (message, canStartViewing ? "Start Viewing" : nil)
     }
 
     private func remoteScreen(in canvasSize: CGSize) -> some View {

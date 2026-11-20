@@ -54,6 +54,12 @@ Changing targets performs this sequence:
 6. Clear the old image.
 7. Create the next generation.
 
+Stop Viewing lasts for the lifetime of the feature across roster, selection,
+and lifecycle changes. Automatic reconnection and cleanup completion honor
+it. Only Start Viewing clears it, with an active app, a paired selection,
+settled input cleanup, and no unacknowledged cleanup failure. Retry can
+acknowledge failed cleanup while viewing stays stopped.
+
 Freeing a Rust session cancels and joins its structured tasks. Its callback
 context cannot be invoked after the corresponding free operation returns.
 

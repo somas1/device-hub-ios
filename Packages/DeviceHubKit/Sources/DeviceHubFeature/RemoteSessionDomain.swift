@@ -32,7 +32,7 @@ public extension RemoteSessionFeature {
         public var isLoadingRoster: Bool
         /// Whether a continuous availability stream is being observed.
         public var isObservingAvailability: Bool
-        /// Explicit user preference to keep the selected device disconnected.
+        /// Feature-lifetime preference to stay disconnected until explicit Start.
         public var isViewingStopped: Bool
         /// App lifecycle used to enforce session and input ownership.
         public var lifecycle: DeviceHubAppLifecycle
@@ -84,6 +84,13 @@ public extension RemoteSessionFeature {
                 return nil
             }
             return roster.devices.first { $0.id == selectedDeviceID }
+        }
+
+        /// Start never acknowledges failed cleanup or bypasses an unsettled owner.
+        /// An explicit offline Start permits connection when the target returns.
+        public var canStartViewing: Bool {
+            lifecycle == .active && pendingInputCleanup == nil && !inputCleanupFailed
+                && selectedDevice?.pairingState == .paired
         }
 
         /// Explicit title-menu state derived with the same precedence as the

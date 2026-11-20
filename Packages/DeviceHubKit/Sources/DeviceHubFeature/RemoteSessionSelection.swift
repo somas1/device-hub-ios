@@ -26,7 +26,6 @@ extension RemoteSessionFeature {
             }
 
             state.selectedDeviceID = deviceID
-            state.isViewingStopped = false
             state.pairing = nil
             return beginSessionIfPossible(
                 state: &state,
@@ -61,7 +60,7 @@ extension RemoteSessionFeature {
             }, begin)
 
         case .startViewingButtonTapped:
-            guard let device = state.selectedDevice else {
+            guard state.canStartViewing, let device = state.selectedDevice else {
                 return .none
             }
             state.isViewingStopped = false
@@ -95,10 +94,10 @@ extension RemoteSessionFeature {
         state: inout State,
         device: DeviceSummary
     ) -> Effect<Action> {
-        guard !state.inputCleanupFailed, state.pendingInputCleanup == nil else { return .none }
+        guard !state.isViewingStopped, !state.inputCleanupFailed,
+              state.pendingInputCleanup == nil else { return .none }
         let previousSession = state.session
         state.activeContactIDs.removeAll()
-        state.isViewingStopped = false
         state.remediation = nil
         state.session = nil
         let mayConnect = state.lifecycle == .active && device.pairingState == .paired
@@ -134,10 +133,6 @@ extension RemoteSessionFeature {
         state.selectedDeviceID = state.roster.selectionID(
             preserving: previousSelection
         )
-        if state.selectedDeviceID != previousSelection {
-            state.isViewingStopped = false
-        }
-
         let deviceUpdate = updateActiveDevice(state: &state)
 
         guard !state.isViewingStopped,

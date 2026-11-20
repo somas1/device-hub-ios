@@ -5,6 +5,7 @@ import SwiftUI
 struct RemoteSessionMenu: View {
     let acceptsInput: Bool
     let isViewingStopped: Bool
+    let canStartViewing: Bool
     let hasActiveSession: Bool
     let devices: [DeviceSummary]
     let selectedDeviceID: DeviceID?
@@ -115,6 +116,7 @@ struct RemoteSessionMenu: View {
                         systemImage: "play",
                         action: startViewingButtonTapped
                     )
+                    .disabled(!canStartViewing)
                 } else if hasActiveSession {
                     Button(
                         "Reconnect",
