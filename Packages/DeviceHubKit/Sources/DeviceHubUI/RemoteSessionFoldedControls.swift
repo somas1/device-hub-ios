@@ -19,7 +19,7 @@ import SwiftUI
                 Color.clear
                     .allowsHitTesting(false)
                     .overlay(alignment: .topTrailing) {
-                        menu.padding(6)
+                        menu.equatable().padding(6)
                     }
             }
         }

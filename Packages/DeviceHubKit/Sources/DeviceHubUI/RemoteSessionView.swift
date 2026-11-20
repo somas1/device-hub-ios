@@ -87,7 +87,7 @@ struct RemoteSessionView: View {
     private var flatSession: some View {
         canvasWithHeader
             .overlay(alignment: .topTrailing) {
-                sessionMenu.padding(6)
+                sessionMenu.equatable().padding(6)
             }
     }
 
