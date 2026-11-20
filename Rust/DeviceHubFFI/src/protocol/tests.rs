@@ -1090,6 +1090,21 @@ fn userspace_video_offer_and_feedback_remain_one_owned_protocol() {
 }
 
 #[test]
+fn video_feedback_replies_to_the_port_the_device_sends_from() {
+    // The device sends RTP and RTCP from its own port and drops RTCP sent to
+    // the senderPort we offered, so keyframe requests and reports must follow
+    // the source port of the device's datagrams.
+    let mut feedback = VideoFeedbackState::new(0x1020_3040, 0x5060_7080, "call".into());
+    assert_eq!(feedback.peer_port(), VIDEO_SENDER_PORT);
+
+    feedback.observe_source_port(61_234);
+    assert_eq!(feedback.peer_port(), 61_234);
+
+    feedback.observe_source_port(61_240);
+    assert_eq!(feedback.peer_port(), 61_240);
+}
+
+#[test]
 fn orientation_mapping_fails_closed_for_unknown_values() {
     assert_eq!(
         orientation_value(&Orientation::LandscapeLeft),
