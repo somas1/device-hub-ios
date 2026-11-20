@@ -147,7 +147,8 @@ The protocol suites should prove that:
 - orientation and letterbox transforms map to the intended target pixel;
 - turning the iPad without a new video configuration relabels the following
   frames once, a Rotate reply does the same, a failed or unusable orientation
-  check keeps the session and the last orientation, and a portrait-shaped
+  check keeps the session and the last orientation, a check that is never
+  answered stops further checks, and a portrait-shaped
   stream is never labelled landscape (the Rust tests drive the real control
   loop with a scripted orientation service);
 - cancellation releases touches, buttons, keys, and modifiers;

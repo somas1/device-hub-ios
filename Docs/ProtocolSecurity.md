@@ -163,7 +163,13 @@ visible, typed failure rather than an implicit mounting flow.
   landscape-shaped stream and configuration, so the live session also asks
   about once a second, with a two-second limit, and takes the orientation a
   Rotate reply returns. These extra readings are best effort: a failed, late,
-  or unusable one keeps the last orientation and the session continues. A
+  or unusable one keeps the last orientation and the session continues. The
+  orientation service does not tie a reply to its request, so after a check
+  times out the app stops checking for the rest of the session: a later turn
+  is again picked up only at the next video configuration, and if the late
+  reply does arrive, the next orientation read (a Rotate, a volume press, or a
+  configuration) can be one reading old. A check that fails with an error
+  keeps checking. A
   landscape reading for a portrait-shaped stream is held until the next
   configuration, because the app cannot display that pair. A change is
   published as new display geometry and labels the following frames, so a

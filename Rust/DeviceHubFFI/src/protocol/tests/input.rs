@@ -831,6 +831,8 @@ async fn volume_release_after_turning_lets_go_of_the_button_that_was_pressed() {
 struct OrientationSocket {
     replies: std::collections::VecDeque<Vec<u8>>,
     fail_reads: bool,
+    /// Bytes the client has written: its handshake and each request.
+    written: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 impl tokio::io::AsyncRead for OrientationSocket {
     fn poll_read(
@@ -857,6 +859,8 @@ impl tokio::io::AsyncWrite for OrientationSocket {
         _: &mut std::task::Context<'_>,
         bytes: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
+        self.written
+            .fetch_add(bytes.len(), std::sync::atomic::Ordering::AcqRel);
         std::task::Poll::Ready(Ok(bytes.len()))
     }
     fn poll_flush(
@@ -1027,7 +1031,7 @@ async fn periodic_orientation_check_relabels_the_live_stream_once_per_change() {
                 orientation_reply("portrait", "portrait"),
             ]
             .into(),
-            fail_reads: false,
+            ..Default::default()
         },
         landscape_shaped_geometry(DhOrientation::LandscapeLeft),
         Vec::new(),
@@ -1052,6 +1056,7 @@ async fn failed_orientation_checks_do_not_end_the_session() {
             OrientationSocket {
                 replies: Default::default(),
                 fail_reads,
+                ..Default::default()
             },
             landscape_shaped_geometry(DhOrientation::LandscapeLeft),
             vec![ControlCommand::Touch(TouchIntent::Down { x: 1, y: 2 })],
@@ -1079,7 +1084,7 @@ async fn rotate_reply_relabels_the_live_stream() {
     let run = run_live_loop(
         OrientationSocket {
             replies: [orientation_reply("landscapeLeft", "landscapeLeft")].into(),
-            fail_reads: false,
+            ..Default::default()
         },
         landscape_shaped_geometry(DhOrientation::Portrait),
         vec![ControlCommand::Rotate(RotationIntent::Left)],
@@ -1095,8 +1100,8 @@ async fn rotate_reply_relabels_the_live_stream() {
 async fn rejected_rotation_still_fails_the_session() {
     let run = run_live_loop(
         OrientationSocket {
-            replies: Default::default(),
             fail_reads: true,
+            ..Default::default()
         },
         landscape_shaped_geometry(DhOrientation::Portrait),
         vec![ControlCommand::Rotate(RotationIntent::Left)],
@@ -1108,4 +1113,51 @@ async fn rejected_rotation_still_fails_the_session() {
         .expect("A rejected rotation ends the session")
         .unwrap_err();
     assert_eq!(failure.code, "rotation_failed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unanswered_orientation_check_stops_further_checks() {
+    // The reply to a timed-out request could still arrive and be taken as the
+    // answer to the next one, so no further request may go out.
+    let mut written = Vec::new();
+    for cancel_after in [Duration::from_millis(1_500), Duration::from_millis(6_500)] {
+        let socket = OrientationSocket::default();
+        let bytes = socket.written.clone();
+        let run = run_live_loop(
+            socket,
+            landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+            Vec::new(),
+            cancel_after,
+        )
+        .await;
+        assert!(run.early_result.is_none(), "{:?}", run.early_result);
+        run.result.unwrap().unwrap();
+        written.push(bytes.load(std::sync::atomic::Ordering::Acquire));
+    }
+    assert_eq!(
+        written[0], written[1],
+        "Only the first check's request is written in 6.5 s of silence"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn orientation_checks_continue_after_a_service_error() {
+    let mut written = Vec::new();
+    for cancel_after in [Duration::from_millis(1_500), Duration::from_millis(3_500)] {
+        let socket = OrientationSocket {
+            fail_reads: true,
+            ..Default::default()
+        };
+        let bytes = socket.written.clone();
+        let run = run_live_loop(
+            socket,
+            landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+            Vec::new(),
+            cancel_after,
+        )
+        .await;
+        run.result.unwrap().unwrap();
+        written.push(bytes.load(std::sync::atomic::Ordering::Acquire));
+    }
+    assert!(written[1] > written[0], "{written:?}");
 }

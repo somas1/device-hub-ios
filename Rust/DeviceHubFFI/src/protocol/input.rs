@@ -194,6 +194,7 @@ pub(super) async fn run_active_control_loop(
         ORIENTATION_CHECK_INTERVAL,
     );
     orientation_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut orientation_checks_enabled = true;
 
     let result = tokio::select! {
         biased;
@@ -295,17 +296,25 @@ pub(super) async fn run_active_control_loop(
                     input_trace("delivered", &trace_label);
                 }
             }
-            _ = orientation_timer.tick() => {
-                // A failed or late check keeps the last orientation.
-                if let Ok(Ok(state)) = tokio::time::timeout(
+            _ = orientation_timer.tick(), if orientation_checks_enabled => {
+                // A failed check keeps the last orientation. Replies are not
+                // matched to requests, so the late answer to a timed-out check
+                // would be read as the answer to the next one: stop checking.
+                match tokio::time::timeout(
                     ORIENTATION_CHECK_TIMEOUT,
                     orientation.current_orientation(),
                 )
                 .await
-                    && let Err(failure) =
-                        refresh_live_orientation(&mut video.geometry, &state, emitter)
                 {
-                    break Err(failure);
+                    Ok(Ok(state)) => {
+                        if let Err(failure) =
+                            refresh_live_orientation(&mut video.geometry, &state, emitter)
+                        {
+                            break Err(failure);
+                        }
+                    }
+                    Ok(Err(_)) => {}
+                    Err(_) => orientation_checks_enabled = false,
                 }
             }
         }
