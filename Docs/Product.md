@@ -63,24 +63,17 @@ device allows it to connect when it returns.
 
 ## Primary controls
 
-The More menu stays close to the top-right corner and contains:
-
-1. Home
-2. Lock
-3. Keyboard
-4. Rotate
-
-Secondary hardware controls, device selection, pairing, reconnect, and
-stop-viewing live in the same menu. Volume Up, Volume Down and Mute leave the
-menu open after a tap, so the volume can be stepped repeatedly without
-reopening it. There is no bottom action bar or trailing control rail. The
-remote canvas has no app-added padding.
+The corner More menu contains Keyboard, Rotate, Siri, device selection,
+pairing, About, Device Details, and session options as available. At compact
+width it also contains Home, Lock, Volume Up, Volume Down, and Mute, with the
+volume and mute actions keeping the menu open after a tap.
 
 ## Platform adaptation
 
 - iPhone and iPad use one full-window remote-session screen. The More menu
   contains device selection. Device details use a sheet.
-- Flat and cover displays keep hardware actions inside the corner menu.
+- At regular width with a selected device, Home, Lock, Volume Up, Volume Down,
+  and Mute move beside More and dim when remote input is unavailable.
 - On iPhone Duo 27.1, half-open mode places the remote screen above a dedicated
   touch-control area (or beside it when rotated). Home, Lock, Keyboard, and
   Rotate are directly available there. Opening the keyboard uses the existing

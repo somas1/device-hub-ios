@@ -26,6 +26,27 @@
         .snapshots(record: visualSnapshotRecordMode)
     )
     struct DeviceHubVisualSnapshotTests {
+        @Test("Quick controls stay visible and dim when input is unavailable")
+        func quickControls() {
+            for acceptsInput in [true, false] {
+                let view = RemoteSessionQuickControls(
+                    acceptsInput: acceptsInput,
+                    buttonTapped: { _ in }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(RemoteCanvasColor.value)
+
+                assertSnapshot(
+                    of: view,
+                    as: .image(
+                        layout: .fixed(width: 340, height: 64),
+                        traits: UITraitCollection(userInterfaceStyle: .dark)
+                    ),
+                    named: acceptsInput ? "enabled" : "disabled"
+                )
+            }
+        }
+
         @Test("Screen-first state and viewport matrix")
         func visualMatrix() throws {
             for scenario in VisualScenario.allCases where scenario != .livePortraitIPadTargetLandscapeCodedIPadDark {
@@ -99,7 +120,8 @@
             let viewportSize = scenario.size
             size = viewportSize
             traits = UITraitCollection { traits in
-                traits.horizontalSizeClass = viewportSize.width >= 600 ? .regular : .compact
+                traits.horizontalSizeClass = viewportSize.width >= 600 && scenario != .liveLandscapeIPadTargetIPhoneDark
+                    ? .regular : .compact
                 traits.verticalSizeClass = viewportSize.height >= 600 ? .regular : .compact
                 traits.displayScale = 2
                 traits.userInterfaceStyle = appearance

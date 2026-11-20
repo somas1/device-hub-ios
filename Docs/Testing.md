@@ -247,18 +247,19 @@ project moves to a different Xcode, re-record with `mise run snapshots:record`
 and inspect every changed image: accept only text and spacing drift, never
 missing, clipped, or overlapping content.
 
-App integration also launches the simulator-only live fixture and checks its
-actual accessibility tree: Home, Lock, Keyboard, and Rotate must be absent
-from the canvas and present after opening More Controls. These checks use the
-production navigation root and never connect to a real device. Its session
-event and frame streams stay open until the app disconnects; a completed event
-stream means the remote session ended. The fixture's Settings-like display is
-mock service data, not a screenshot from a physical device.
+App integration launches the live fixture on a fresh iPhone simulator at compact
+width and checks that Home, Lock, Keyboard, and Rotate appear only after opening
+More Controls. Snapshot tests cover the five-button bar at regular width with
+input enabled and disabled. Unit tests check that Rotate stays in More at both
+widths. The live fixture uses the production navigation root and never connects
+to a real device. Its session event and frame streams stay open until the app
+disconnects; a completed event stream means the remote session ended. The
+fixture's Settings-like display is mock service data, not a screenshot from a
+physical device.
 
 The visual suite also covers a portrait iPad encoded sideways in a landscape
-frame. Its dedicated `landscapeCodedPortraitIPad` test can record just the new
-reference with `DEVICE_HUB_RECORD_SNAPSHOT_TEST=DeviceHubVisualSnapshotTests/landscapeCodedPortraitIPad`
-and `mise run snapshots:record`; the task then compares the full matrix.
+frame. Run `DEVICE_HUB_RECORD_SNAPSHOT_TEST='DeviceHubVisualSnapshotTests/landscapeCodedPortraitIPad()' mise run snapshots:record`
+to record just that reference and then compare the full matrix.
 
 ## Authorized-device verification
 
