@@ -42,8 +42,9 @@ The keyboard's own accessory controls and corner More menu remain available.
 Native keyboard avoidance and `ArrangementView` placement remain responsible
 for the space.
 
-Liquid Glass gives the small controls contrast over the device image. The
-rest of the canvas remains clear.
+A translucent black capsule keeps the quick-control icons legible over the
+device image. The More button and device header use system glass. The rest of
+the canvas remains clear.
 
 ## Color
 
