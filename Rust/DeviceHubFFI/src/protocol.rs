@@ -65,6 +65,9 @@ const SCREENSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 const MEDIA_START_TIMEOUT: Duration = Duration::from_secs(30);
 const FIRST_VIDEO_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 const VIDEO_FEEDBACK_INTERVAL: Duration = Duration::from_millis(50);
+// The device often ignores a lone PLI/FIR, and without a retry the picture stays
+// frozen until its own periodic keyframe (up to a minute). Re-ask until one lands.
+const KEYFRAME_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(12);
 const INPUT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
 const INPUT_TAP_HOLD: Duration = Duration::from_millis(50);
