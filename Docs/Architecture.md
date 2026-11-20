@@ -153,3 +153,9 @@ portrait target encodes landscape-shaped frames. The decoder validates each
 frame and carries its display turn on `RemoteDisplayFrame`. The canvas uses
 that turn as an image orientation without rotating pixel buffers; layout and
 input mapping share the corrected native size and target orientation.
+
+The target orientation comes from the Rust worker. It reads it at each new
+video configuration, which must succeed, and between configurations about once
+a second and after each Rotate, which may fail without ending the session. The
+second path exists because turning some iPads does not change the video
+configuration. See [Protocol security](ProtocolSecurity.md) for the rules.

@@ -1255,6 +1255,168 @@ fn orientation_mapping_fails_closed_for_unknown_values() {
     assert_eq!(orientation_from_raw(u32::MAX), DhOrientation::Unknown);
 }
 
+fn live_orientation(
+    orientation: Orientation,
+    non_flat_orientation: Orientation,
+) -> OrientationState {
+    OrientationState {
+        orientation,
+        non_flat_orientation,
+        locked: false,
+    }
+}
+
+#[test]
+fn polled_orientation_relabels_same_revision_access_units_without_a_new_configuration() {
+    let capture = ProtocolMediaCapture::default();
+    let media = test_media_emitter(&capture);
+    let control = EventEmitterTestFixture::new();
+    let emitter = control.emitter();
+    let mut assembler = HevcAccessUnitAssembler::new(TEST_VIDEO_PAYLOAD_TYPE, TEST_VIDEO_SSRC);
+    let mut last_configuration_revision = 0;
+    let mut geometry = test_geometry();
+    geometry.orientation = DhOrientation::LandscapeLeft as u32;
+    geometry.non_flat_orientation = DhOrientation::LandscapeLeft as u32;
+    prime_test_video_stream(
+        &mut assembler,
+        &mut last_configuration_revision,
+        &mut geometry,
+        &media,
+        &emitter,
+    );
+    capture.events.lock().unwrap().clear();
+    control.pending_event_count();
+
+    // The iPad was turned; the encoder keeps its parameter sets.
+    let portrait = live_orientation(Orientation::Portrait, Orientation::Portrait);
+    assert!(refresh_live_orientation(&mut geometry, &portrait, &emitter).unwrap());
+    assert_eq!(control.pending_event_count(), 1);
+
+    let sample = test_nal(1, &[0x60]);
+    process_video_datagram(
+        test_rtp_datagram(TEST_VIDEO_PAYLOAD_TYPE, 4, 4, true, &sample),
+        VIDEO_SENDER_PORT,
+        &mut assembler,
+        &mut last_configuration_revision,
+        &mut geometry,
+        &media,
+        &emitter,
+    )
+    .unwrap();
+    {
+        let events = capture.events.lock().unwrap();
+        assert_eq!(
+            events.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+            vec![DhEventKind::VideoAccessUnit]
+        );
+        let access_unit_geometry = events.last().unwrap().1.unwrap();
+        assert_eq!(
+            access_unit_geometry.orientation,
+            DhOrientation::Portrait as u32
+        );
+        assert_eq!(
+            (
+                access_unit_geometry.pixel_width,
+                access_unit_geometry.pixel_height
+            ),
+            (64, 64)
+        );
+    }
+    assert_eq!(last_configuration_revision, 1);
+
+    assert!(!refresh_live_orientation(&mut geometry, &portrait, &emitter).unwrap());
+    assert_eq!(control.pending_event_count(), 0);
+}
+
+#[test]
+fn live_orientation_never_labels_a_portrait_shaped_stream_landscape() {
+    let control = EventEmitterTestFixture::new();
+    let emitter = control.emitter();
+    let portrait_shaped = DhDisplayGeometry {
+        pixel_width: 1032,
+        pixel_height: 1376,
+        ..test_geometry()
+    };
+
+    for landscape in [Orientation::LandscapeLeft, Orientation::LandscapeRight] {
+        let mut geometry = portrait_shaped;
+        let state = live_orientation(landscape.clone(), landscape);
+        assert!(!refresh_live_orientation(&mut geometry, &state, &emitter).unwrap());
+        assert_eq!(geometry.orientation, DhOrientation::Portrait as u32);
+        assert_eq!(
+            geometry.non_flat_orientation,
+            DhOrientation::Portrait as u32
+        );
+    }
+    assert_eq!(control.pending_event_count(), 0);
+
+    let mut geometry = portrait_shaped;
+    let upside_down = live_orientation(
+        Orientation::PortraitUpsideDown,
+        Orientation::PortraitUpsideDown,
+    );
+    assert!(refresh_live_orientation(&mut geometry, &upside_down, &emitter).unwrap());
+    assert_eq!(
+        geometry.orientation,
+        DhOrientation::PortraitUpsideDown as u32
+    );
+
+    // A landscape-shaped stream shows every label: portrait as a transposed frame.
+    let mut geometry = DhDisplayGeometry {
+        pixel_width: 1376,
+        pixel_height: 1032,
+        orientation: DhOrientation::LandscapeLeft as u32,
+        non_flat_orientation: DhOrientation::LandscapeLeft as u32,
+        ..test_geometry()
+    };
+    let portrait = live_orientation(Orientation::Portrait, Orientation::Portrait);
+    assert!(refresh_live_orientation(&mut geometry, &portrait, &emitter).unwrap());
+    assert_eq!(geometry.orientation, DhOrientation::Portrait as u32);
+    assert_eq!(control.pending_event_count(), 2);
+}
+
+#[test]
+fn unusable_live_orientation_is_ignored_and_flat_uses_the_last_upright_side() {
+    let control = EventEmitterTestFixture::new();
+    let emitter = control.emitter();
+    let landscape_shaped = DhDisplayGeometry {
+        pixel_width: 1376,
+        pixel_height: 1032,
+        orientation: DhOrientation::LandscapeLeft as u32,
+        non_flat_orientation: DhOrientation::LandscapeLeft as u32,
+        ..test_geometry()
+    };
+
+    for unusable in [
+        live_orientation(Orientation::Unknown("future".into()), Orientation::FaceDown),
+        live_orientation(Orientation::FaceUp, Orientation::Unknown("future".into())),
+        live_orientation(Orientation::FaceDown, Orientation::FaceUp),
+    ] {
+        let mut geometry = landscape_shaped;
+        assert!(!refresh_live_orientation(&mut geometry, &unusable, &emitter).unwrap());
+        assert_eq!(geometry.orientation, DhOrientation::LandscapeLeft as u32);
+        assert_eq!(
+            geometry.non_flat_orientation,
+            DhOrientation::LandscapeLeft as u32
+        );
+    }
+    assert_eq!(control.pending_event_count(), 0);
+
+    let mut geometry = landscape_shaped;
+    let flat = live_orientation(Orientation::FaceUp, Orientation::LandscapeRight);
+    assert!(refresh_live_orientation(&mut geometry, &flat, &emitter).unwrap());
+    assert_eq!(geometry.orientation, DhOrientation::LandscapeRight as u32);
+    assert_eq!(control.pending_event_count(), 1);
+}
+
+#[test]
+fn configuration_time_orientation_still_fails_closed() {
+    let mut geometry = test_geometry();
+    let unusable = live_orientation(Orientation::Unknown("future".into()), Orientation::FaceDown);
+    let failure = update_geometry_orientation(&mut geometry, &unusable).unwrap_err();
+    assert_eq!(failure.code, "unsupported_device_orientation");
+}
+
 #[tokio::test]
 #[ignore = "requires an already-established trusted Xcode tunnel"]
 async fn live_ios_rsd_property_contract() {

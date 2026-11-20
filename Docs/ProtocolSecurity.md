@@ -157,6 +157,23 @@ visible, typed failure rather than an implicit mounting flow.
   access units for VideoToolbox decoding.
 - Each decoded frame carries generation, orientation, dimensions, presentation
   time, and receipt time.
+- Rust reads the orientation when the session starts and whenever a new video
+  configuration arrives; a missing or unusable reading there ends the session.
+  Turning some iPads (a 13-inch iPad, for example) keeps the same
+  landscape-shaped stream and configuration, so the live session also asks
+  about once a second, with a two-second limit, and takes the orientation a
+  Rotate reply returns. These extra readings are best effort: a failed, late,
+  or unusable one keeps the last orientation and the session continues. The
+  orientation service does not tie a reply to its request, so after a check
+  times out the app stops checking for the rest of the session: a later turn
+  is again picked up only at the next video configuration, and if the late
+  reply does arrive, the next orientation read (a Rotate, a volume press, or a
+  configuration) can be one reading old. A check that fails with an error
+  keeps checking. A
+  landscape reading for a portrait-shaped stream is held until the next
+  configuration, because the app cannot display that pair. A change is
+  published as new display geometry and labels the following frames, so a
+  turn can show the old orientation for up to about a second.
 - Input is disabled until a fresh decoded frame and HID readiness belong to the
   same generation.
 - Coordinates are transformed through the displayed aspect-fit rectangle and
@@ -169,7 +186,7 @@ visible, typed failure rather than an implicit mounting flow.
 - iPadOS swaps the physical volume buttons while the iPad is upside down, so
   Volume Up and Volume Down are sent as the other physical button in that
   orientation, asked from the orientation service at each volume press (the
-  video geometry does not change on a 180° turn). A release always goes
+  video geometry's orientation can lag a turn by up to about a second). A release always goes
   to the physical button its press used, even if the iPad turned in between.
 - A bitmap report carries no order, so a tap with modifiers (Shift+' for a
   double quote, for example) sends the modifiers alone, then with the key,

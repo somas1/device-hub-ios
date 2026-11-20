@@ -1,4 +1,13 @@
 use super::*;
+
+/// How often the live session asks the iPad which way up it is. Turning some
+/// iPads keeps the encoder's configuration, which would otherwise be the only
+/// time the orientation is re-read.
+const ORIENTATION_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+/// A periodic check is best effort, so it gives up well before `INPUT_TIMEOUT`
+/// to keep video and input moving.
+const ORIENTATION_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub(super) async fn run_control_stream(
     adapter: &mut tcp::handle::AdapterHandle,
     handshake: &mut RsdHandshake,
@@ -180,6 +189,12 @@ pub(super) async fn run_active_control_loop(
         VIDEO_FEEDBACK_INTERVAL,
     );
     feedback_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut orientation_timer = tokio::time::interval_at(
+        feedback_started_at + ORIENTATION_CHECK_INTERVAL,
+        ORIENTATION_CHECK_INTERVAL,
+    );
+    orientation_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut orientation_checks_enabled = true;
 
     let result = tokio::select! {
         biased;
@@ -270,6 +285,8 @@ pub(super) async fn run_active_control_loop(
                         &mut indigo_hid,
                         &mut orientation,
                         &mut cleanup,
+                        &mut video.geometry,
+                        emitter,
                     )
                     .await
                 {
@@ -277,6 +294,27 @@ pub(super) async fn run_active_control_loop(
                 }
                 if let Some(trace_label) = trace_label {
                     input_trace("delivered", &trace_label);
+                }
+            }
+            _ = orientation_timer.tick(), if orientation_checks_enabled => {
+                // A failed check keeps the last orientation. Replies are not
+                // matched to requests, so the late answer to a timed-out check
+                // would be read as the answer to the next one: stop checking.
+                match tokio::time::timeout(
+                    ORIENTATION_CHECK_TIMEOUT,
+                    orientation.current_orientation(),
+                )
+                .await
+                {
+                    Ok(Ok(state)) => {
+                        if let Err(failure) =
+                            refresh_live_orientation(&mut video.geometry, &state, emitter)
+                        {
+                            break Err(failure);
+                        }
+                    }
+                    Ok(Err(_)) => {}
+                    Err(_) => orientation_checks_enabled = false,
                 }
             }
         }
@@ -734,9 +772,9 @@ fn physical_button(
     }
 }
 
-/// Orientation that picks the physical volume button. The video geometry only
-/// refreshes on a new encoder configuration, which turning the iPad upside
-/// down does not produce, so volume presses ask the orientation service.
+/// Orientation that picks the physical volume button. The video geometry's
+/// orientation is checked only about once a second, so volume presses ask the
+/// orientation service for the current one.
 /// Without an answer the button is sent unswapped rather than failing.
 pub(super) fn volume_orientation(state: Option<&OrientationState>) -> DhOrientation {
     state
@@ -762,6 +800,8 @@ async fn handle_control_command(
     indigo_hid: &mut IndigoHidClient<Box<dyn idevice::ReadWrite>>,
     orientation: &mut OrientationServiceClient<Box<dyn idevice::ReadWrite>>,
     cleanup: &mut InputCleanupState,
+    geometry: &mut DhDisplayGeometry,
+    emitter: &EventEmitter,
 ) -> Result<(), PublicFailure> {
     match command {
         ControlCommand::VideoControlDatagram(datagram) => video_udp
@@ -846,7 +886,7 @@ async fn handle_control_command(
                 RotationIntent::Left => RotationDirection::Left,
                 RotationIntent::Right => RotationDirection::Right,
             };
-            orientation.rotate(direction).await.map_err(|_| {
+            let state = orientation.rotate(direction).await.map_err(|_| {
                 PublicFailure::new(
                     "rotation_failed",
                     "rotation",
@@ -854,9 +894,9 @@ async fn handle_control_command(
                     "The authenticated orientation service rejected the rotation.",
                 )
             })?;
-            // A successful control reply does not prove that the encoded
-            // display changed. The next video configuration owns geometry.
-            Ok(())
+            // The reply carries the new orientation. A stream whose shape
+            // cannot show it yet keeps the old one until its next configuration.
+            refresh_live_orientation(geometry, &state, emitter).map(|_| ())
         }
         ControlCommand::ReleaseAllInput => {
             release_all_inputs_bounded(cleanup, universal_hid, keyboard_service_id, indigo_hid)

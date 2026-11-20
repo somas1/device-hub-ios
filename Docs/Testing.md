@@ -151,6 +151,12 @@ The protocol suites should prove that:
 - malformed lengths, padding, packets, and codec units fail closed;
 - screenshot delivery precedes the live display transition;
 - orientation and letterbox transforms map to the intended target pixel;
+- turning the iPad without a new video configuration relabels the following
+  frames once, a Rotate reply does the same, a failed or unusable orientation
+  check keeps the session and the last orientation, a check that is never
+  answered stops further checks, and a portrait-shaped
+  stream is never labelled landscape (the Rust tests drive the real control
+  loop with a scripted orientation service);
 - cancellation releases touches, buttons, keys, and modifiers;
 - stale events from an earlier connection generation are ignored;
 - teardown reaches EOF without callbacks, leaks, or lingering advertisements;
