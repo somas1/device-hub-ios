@@ -1,5 +1,7 @@
 import CustomDump
+import DeviceHubClient
 import DeviceHubCore
+import DeviceHubDiagnostics
 @testable import DeviceHubTransport
 import Dispatch
 import Foundation
@@ -398,6 +400,121 @@ struct NativeVideoBoundaryTests {
                 NativeVideoEventBridge.maximumBufferCapacity + 1
             )
         }
+    }
+}
+
+extension NativeVideoBoundaryTests {
+    @Test("Native failure classification survives either consumer order", .timeLimit(.minutes(1)), arguments: [false, true])
+    func nativeFailureConsumerOrdering(controlFirst: Bool) async throws {
+        let generation = testGeneration(14)
+        let failure = NativeSessionFailure(code: "video_receiver_rejected", stage: "video_start_receiver", retryable: false)
+        let registration = BlockingSynchronizationPoint()
+        let cancelEntered = TestSignal()
+        let cancelGate = AsyncStream<Void>.makeStream()
+        let control = AsyncThrowingStream<NativeSessionEvent, Error>.makeStream()
+        let diagnostics = AsyncStream<(DeviceHubError, DiagnosticStage)>.makeStream()
+        let cancellations = AsyncStream<Void>.makeStream()
+        let commands = AsyncStream<DeviceCommand>.makeStream()
+        let bridge = try NativeVideoEventBridge(
+            generation: generation,
+            synchronization: NativeVideoEventBridgeSynchronization(
+                didRegisterWaiter: {
+                    if controlFirst {
+                        registration.arriveAndWait()
+                    }
+                },
+                beforeResumingDelivery: {}
+            )
+        )
+        let native = NativeSession(
+            events: control.stream, videoEvents: bridge.events,
+            start: { control.continuation.yield(.inputReady) },
+            completePersistence: { _, _ in },
+            send: { commands.continuation.yield($0) },
+            cancel: {
+                cancellations.continuation.yield(())
+                cancelEntered.signal()
+                for await _ in cancelGate.stream {}
+                _ = bridge.cancel()
+                control.continuation.finish()
+            }
+        )
+        let persistence = try PersistenceProbe(records: [fixtureRecord()])
+        let operation = await RemoteSessionOperation.make(
+            nativeSession: native, generation: generation,
+            initialDevice: DeviceSummary(
+                id: deviceID, name: "Synthetic device", productType: "iPhone", operatingSystemVersion: "27.0",
+                pairingState: .paired, reachability: .reachable
+            ), claimedDeviceID: deviceID,
+            environment: DeviceHubTransportEnvironment(
+                persistence: persistence.client, bonjour: BonjourClientProbe(availability: []).client,
+                observe: { diagnostics.continuation.yield(($0, $1)) }, now: { now }, makeUUID: { generation.rawValue }
+            )
+        )
+        let drain: @Sendable (Task<Void, Never>?) async -> Void = { media in
+            registration.release()
+            cancelGate.continuation.finish()
+            control.continuation.finish()
+            await Task.detached { try? await operation.deviceSession.disconnect(); await media?.value }.value
+        }
+        var media: Task<Void, Never>?
+        try await withTaskCancellationHandler {
+            do {
+                try await operation.start()
+                media = await operation.mediaTask
+                var updates = operation.deviceSession.events.makeAsyncIterator()
+                #expect(try await updates.next()?.event == .hidReadinessChanged(.ready))
+                if controlFirst {
+                    await registration.waitUntilReached()
+                }
+                // Preserve native publication order: synchronous video first, control second.
+                #expect(bridge.receiveFailure(failure) == .terminal(.failed(.native(failure))))
+                if !controlFirst {
+                    #expect(try await updates.next()?.event == .ended(.secureConnectionFailed))
+                    await cancelEntered.wait()
+                }
+                control.continuation.yield(.failed(failure))
+                control.continuation.finish(throwing: failure)
+                if controlFirst {
+                    await cancelEntered.wait()
+                    registration.release()
+                }
+                cancelGate.continuation.finish()
+                if controlFirst {
+                    #expect(try await updates.next()?.event == .ended(.secureConnectionFailed))
+                }
+                do {
+                    let extra = try await updates.next()
+                    Issue.record("Expected throwing stream termination, received \(String(describing: extra))")
+                } catch let error as DeviceHubError {
+                    #expect(error == .secureConnectionFailed)
+                }
+                var observations = diagnostics.stream.makeAsyncIterator()
+                if !controlFirst {
+                    let mediaFailure = try #require(await observations.next())
+                    #expect(mediaFailure == (.secureConnectionFailed, .startingVideoReceiver))
+                }
+                let nativeFailure = try #require(await observations.next())
+                #expect(nativeFailure == (.secureConnectionFailed, .startingVideoReceiver))
+            } catch {
+                await drain(media)
+                throw error
+            }
+            await drain(media)
+        } onCancel: {
+            registration.release()
+            cancelGate.continuation.finish()
+            control.continuation.finish()
+            cancelEntered.signal()
+        }
+        diagnostics.continuation.finish()
+        cancellations.continuation.finish()
+        commands.continuation.finish()
+        let cancelCount = await cancellations.stream.reduce(0) { count, _ in count + 1 }
+        let sent = await commands.stream.reduce(into: [DeviceCommand]()) { $0.append($1) }
+        #expect(cancelCount == 1)
+        #expect(sent == [.releaseAllInput])
+        #expect(await operation.cleanup() == nil)
     }
 }
 

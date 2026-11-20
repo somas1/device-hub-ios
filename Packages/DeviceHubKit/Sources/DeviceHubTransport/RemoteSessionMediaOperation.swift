@@ -38,7 +38,10 @@ extension RemoteSessionOperation {
                 case .discontinuity:
                     try await resetDecoder()
 
-                case .failed:
+                case let .failed(failure):
+                    if case let .native(cause) = failure.reason {
+                        throw cause
+                    }
                     throw DeviceHubError.decoderFailed
 
                 case .finished:
@@ -48,6 +51,11 @@ extension RemoteSessionOperation {
             throw DeviceHubError.decoderFailed
         } catch is CancellationError {
             return
+        } catch let failure as NativeSessionFailure {
+            await terminateForMediaFailure(
+                mapNativeFailure(failure),
+                stage: nativeFailureDiagnosticStage(failure)
+            )
         } catch let error as MediaDecoderError {
             await terminateForMediaFailure(
                 error.deviceHubError,
