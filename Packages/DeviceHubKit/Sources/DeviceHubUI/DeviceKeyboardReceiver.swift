@@ -8,6 +8,7 @@ import SwiftUI
 /// automatic clipboard synchronization.
 struct DeviceKeyboardReceiver: View {
     @Binding var isPresented: Bool
+    var focusRequest = 0
 
     let keyChanged: (KeyCommand) -> Void
     let keyTapped: (DeviceKey, KeyModifiers) -> Void
@@ -16,6 +17,7 @@ struct DeviceKeyboardReceiver: View {
         #if os(iOS)
             DeviceKeyboardTextFieldRepresentable(
                 isPresented: $isPresented,
+                focusRequest: focusRequest,
                 keyChanged: keyChanged,
                 keyTapped: keyTapped
             )
@@ -30,6 +32,7 @@ struct DeviceKeyboardReceiver: View {
 
     private struct DeviceKeyboardTextFieldRepresentable: UIViewRepresentable {
         @Binding var isPresented: Bool
+        let focusRequest: Int
 
         let keyChanged: (KeyCommand) -> Void
         let keyTapped: (DeviceKey, KeyModifiers) -> Void
@@ -44,6 +47,7 @@ struct DeviceKeyboardReceiver: View {
 
         func makeUIView(context: Context) -> DeviceKeyboardTextField {
             let textField = DeviceKeyboardTextField()
+            textField.setSoftwareKeyboardShown(false)
             textField.onDone = context.coordinator.doneButtonTapped
             textField.onKeyChanged = context.coordinator.keyChanged
             textField.onKeyTapped = context.coordinator.keyTapped
@@ -58,7 +62,18 @@ struct DeviceKeyboardReceiver: View {
             context.coordinator.keyChanged = keyChanged
             context.coordinator.keyTapped = keyTapped
 
-            textField.setPresented(isPresented)
+            // Canvas interaction and opening the software keyboard are explicit
+            // requests; streaming updates leave the current focus owner alone.
+            if context.coordinator.focusRequest != focusRequest
+                || (isPresented && textField.inputView != nil)
+            {
+                if !textField.isFirstResponder {
+                    textField.setPresented(false)
+                }
+                context.coordinator.focusRequest = focusRequest
+            }
+            textField.setSoftwareKeyboardShown(isPresented)
+            textField.setPresented(true)
         }
 
         static func dismantleUIView(
@@ -71,6 +86,7 @@ struct DeviceKeyboardReceiver: View {
         @MainActor
         final class Coordinator {
             var isPresented: Binding<Bool>
+            var focusRequest = 0
             var keyChanged: (KeyCommand) -> Void
             var keyTapped: (DeviceKey, KeyModifiers) -> Void
 
@@ -97,11 +113,29 @@ struct DeviceKeyboardReceiver: View {
         var onKeyTapped: (DeviceKey, KeyModifiers) -> Void = { _, _ in }
 
         private var isPresentationRequested = false
-        private var pressedSpecialKeys = DeviceKeyboardPressedKeyLedger()
+        private var isFocusSuspended = false
+        private lazy var accessoryToolbar = makeAccessoryToolbar()
+        private var isReacquireScheduled = false
+        var pressedSpecialKeys = DeviceKeyboardPressedKeyLedger()
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             configure()
+            // Hardware focus starts with a session, so a held key must not
+            // outlive this window's or scene's keyboard focus.
+            // ponytail: releases on any scene/window, harmless when nothing is held.
+            for name in [UIScene.willDeactivateNotification, UIWindow.didResignKeyNotification] {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(focusLost),
+                    name: name,
+                    object: nil
+                )
+            }
+        }
+
+        @objc private func focusLost() {
+            releasePressedSpecialKeys()
         }
 
         @available(*, unavailable)
@@ -115,18 +149,38 @@ struct DeviceKeyboardReceiver: View {
         }
 
         override func deleteBackward() {
+            guard !yieldIfCovered() else {
+                return
+            }
             tap(.delete)
         }
 
         override func resignFirstResponder() -> Bool {
+            let heldFocus = isFirstResponder
             releasePressedSpecialKeys()
-            return super.resignFirstResponder()
+            let resigned = super.resignFirstResponder()
+            if resigned, heldFocus, isPresentationRequested, window != nil {
+                if isCovered {
+                    // A sheet or alert may take focus itself; win it back once it closes.
+                    scheduleReacquire()
+                } else {
+                    isFocusSuspended = true
+                    if inputView == nil {
+                        onDone()
+                    }
+                }
+            }
+            return resigned
         }
 
         override func pressesBegan(
             _ presses: Set<UIPress>,
             with event: UIPressesEvent?
         ) {
+            guard !yieldIfCovered() else {
+                super.pressesBegan(presses, with: event)
+                return
+            }
             var unhandledPresses: Set<UIPress> = []
 
             for press in presses {
@@ -173,10 +227,48 @@ struct DeviceKeyboardReceiver: View {
             }
         }
 
-        /// Retains keyboard intent until UIKit attaches the responder to a window.
+        /// Clipboard transfer stays explicit: in hardware-only mode (focus held for
+        /// the whole session) paste is refused, so Cmd+V cannot type the local
+        /// clipboard remotely. With the software keyboard shown, paste types it.
+        override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            if action == #selector(paste(_:)), inputView != nil {
+                return false
+            }
+            return super.canPerformAction(action, withSender: sender)
+        }
+
+        /// Hides the on-screen keyboard; hardware keys stay live.
+        func doneTapped() {
+            releasePressedSpecialKeys()
+            onDone()
+        }
+
+        /// An empty input view keeps focus for hardware keys (including a Mac
+        /// keyboard shared through Mac Virtual Display) without showing the
+        /// software keyboard.
+        func setSoftwareKeyboardShown(_ shown: Bool) {
+            guard (inputView == nil) != shown else {
+                return
+            }
+            inputView = shown ? nil : UIView()
+            inputAccessoryView = shown ? accessoryToolbar : nil
+            if isFirstResponder {
+                reloadInputViews()
+            }
+        }
+
+        /// Acquires on a new request, retaining intent until window attachment.
         func setPresented(_ isPresented: Bool) {
+            let changed = isPresentationRequested != isPresented
             isPresentationRequested = isPresented
-            synchronizePresentation()
+            if changed {
+                isFocusSuspended = false
+                synchronizePresentation()
+            } else if isCovered || isReacquireScheduled {
+                // Preserve the existing cover/recovery path without treating
+                // ordinary SwiftUI updates as permission to steal focus.
+                synchronizePresentation()
+            }
         }
 
         func textField(
@@ -184,24 +276,13 @@ struct DeviceKeyboardReceiver: View {
             shouldChangeCharactersIn _: NSRange,
             replacementString string: String
         ) -> Bool {
-            guard textField === self else {
+            guard textField === self, !yieldIfCovered() else {
                 return false
             }
             if !string.isEmpty {
                 forward(string)
             }
             return false
-        }
-
-        func textFieldDidEndEditing(_ textField: UITextField) {
-            guard textField === self, isPresentationRequested else {
-                return
-            }
-            // UIKit can dismiss the keyboard independently of our button.
-            // Clear the binding so the next tap requests an open, not a close.
-            isPresentationRequested = false
-            releasePressedSpecialKeys()
-            onDone()
         }
 
         private func configure() {
@@ -219,7 +300,9 @@ struct DeviceKeyboardReceiver: View {
             spellCheckingType = .no
             textColor = .clear
             tintColor = .clear
-            inputAccessoryView = makeAccessoryToolbar()
+            inputAccessoryView = accessoryToolbar
+            inputAssistantItem.leadingBarButtonGroups = []
+            inputAssistantItem.trailingBarButtonGroups = []
             delegate = self
         }
 
@@ -247,8 +330,7 @@ struct DeviceKeyboardReceiver: View {
             let toolbar = UIToolbar()
             toolbar.items = [
                 accessoryButton("Done") { [weak self] in
-                    self?.setPresented(false)
-                    self?.onDone()
+                    self?.doneTapped()
                 },
                 UIBarButtonItem(systemItem: .flexibleSpace),
                 accessoryButton("Esc") { [weak self] in
@@ -347,8 +429,51 @@ struct DeviceKeyboardReceiver: View {
             }
         }
 
+        /// A sheet or alert over this window owns the keyboard.
+        private var isCovered: Bool {
+            window?.rootViewController?.presentedViewController != nil
+        }
+
+        /// Gives up focus when covered, so keys arriving before the next SwiftUI
+        /// update never reach the device. Returns whether it yielded.
+        private func yieldIfCovered() -> Bool {
+            guard isCovered else {
+                return false
+            }
+            releasePressedSpecialKeys()
+            if isFirstResponder {
+                _ = resignFirstResponder()
+            }
+            scheduleReacquire()
+            return true
+        }
+
+        // ponytail: 0.5 s poll while covered; a dismissal callback would replace it.
+        /// Re-checks after a presentation without waiting for a SwiftUI update
+        /// (a static remote screen may send no frames).
+        private func scheduleReacquire() {
+            guard isPresentationRequested, !isFocusSuspended, !isReacquireScheduled else {
+                return
+            }
+            isReacquireScheduled = true
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self else {
+                    return
+                }
+                isReacquireScheduled = false
+                synchronizePresentation()
+            }
+        }
+
+        /// Sheets and alerts temporarily own the keyboard. Other focus owners
+        /// keep it until a fresh, explicit presentation request.
         private func synchronizePresentation() {
-            guard isPresentationRequested, window != nil else {
+            if isPresentationRequested, window != nil, isCovered {
+                _ = yieldIfCovered()
+                return
+            }
+            guard isPresentationRequested, !isFocusSuspended, window != nil else {
                 releasePressedSpecialKeys()
                 if isFirstResponder {
                     _ = resignFirstResponder()
