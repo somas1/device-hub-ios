@@ -173,6 +173,7 @@ pub(super) async fn run_active_control_loop(
     let first_video_frame_deadline = tokio::time::sleep(FIRST_VIDEO_FRAME_TIMEOUT);
     tokio::pin!(first_video_frame_deadline);
     let mut has_emitted_video_access_unit = false;
+    let mut last_video_datagram = std::time::Instant::now();
     let feedback_started_at = tokio::time::Instant::now();
     let mut feedback_timer = tokio::time::interval_at(
         feedback_started_at + VIDEO_FEEDBACK_INTERVAL,
@@ -194,6 +195,7 @@ pub(super) async fn run_active_control_loop(
             datagram = video_udp.recv() => {
                 match datagram {
                     Ok(datagram) => {
+                        last_video_datagram = std::time::Instant::now();
                         feedback.observe_source_port(datagram.source_port);
                         match process_live_video_datagram(
                             datagram.data,
@@ -230,7 +232,11 @@ pub(super) async fn run_active_control_loop(
             }
             _ = feedback_timer.tick() => {
                 let report = feedback.periodic_report(feedback_started_at.elapsed());
-                let retry = feedback.keyframe_retry(std::time::Instant::now());
+                let now = std::time::Instant::now();
+                if has_emitted_video_access_unit && video_stream_stalled(last_video_datagram, now) {
+                    break 'stream Err(media_stalled());
+                }
+                let retry = feedback.keyframe_retry(now);
                 for datagram in report.into_iter().chain(retry) {
                     if video_udp.send_to(feedback.peer_port(), datagram).await.is_err() {
                         break 'stream Err(video_control_delivery_failed());

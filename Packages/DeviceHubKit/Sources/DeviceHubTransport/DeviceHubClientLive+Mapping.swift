@@ -73,6 +73,8 @@ func mapNativeFailure(
          "developer_mode_status_unsupported",
          "video_negotiation_rejected":
         .unsupportedProtocolVersion
+    case "media_stalled":
+        .mediaStalled
     case "pair_setup_failed":
         .pairingRejected
     case "pairing_listener_accept_failed":

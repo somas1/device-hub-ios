@@ -68,6 +68,10 @@ const VIDEO_FEEDBACK_INTERVAL: Duration = Duration::from_millis(50);
 // The device often ignores a lone PLI/FIR, and without a retry the picture stays
 // frozen until its own periodic keyframe (up to a minute). Re-ask until one lands.
 const KEYFRAME_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+// The device keeps sending RTCP sender reports while the screen is static, so a
+// silent video socket means the path is gone (airplane mode, lost access point).
+// Without this the session stayed "Live" until the kernel's TCP timeout.
+const MEDIA_STALL_TIMEOUT: Duration = Duration::from_secs(10);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(12);
 const INPUT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(3);
 const INPUT_TAP_HOLD: Duration = Duration::from_millis(50);
