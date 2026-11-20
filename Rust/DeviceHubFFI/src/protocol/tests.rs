@@ -1104,12 +1104,27 @@ fn keyframe_requests_repeat_until_a_sync_frame_arrives() {
     };
     assert_eq!(
         feedback.consume(&gap, start),
-        vec![build_keyframe_request(our_ssrc, call_id, device_ssrc, &[], 0)]
+        vec![build_keyframe_request(
+            our_ssrc,
+            call_id,
+            device_ssrc,
+            &[],
+            0
+        )]
     );
-    assert_eq!(feedback.keyframe_retry(start + Duration::from_secs(2)), None);
+    assert_eq!(
+        feedback.keyframe_retry(start + Duration::from_secs(2)),
+        None
+    );
     assert_eq!(
         feedback.keyframe_retry(start + KEYFRAME_RETRY_INTERVAL),
-        Some(build_keyframe_request(our_ssrc, call_id, device_ssrc, &[], 1)),
+        Some(build_keyframe_request(
+            our_ssrc,
+            call_id,
+            device_ssrc,
+            &[],
+            1
+        )),
         "an ignored keyframe request is repeated"
     );
     let synced = VideoDatagramOutcome {
@@ -1166,8 +1181,8 @@ fn a_sync_sample_after_a_gap_in_the_same_batch_needs_no_keyframe_request() {
         )
         .unwrap();
         outcome.emitted_sync_access_unit |= next.emitted_sync_access_unit;
-        outcome.requires_keyframe = next.requires_keyframe
-            || (outcome.requires_keyframe && !next.emitted_sync_access_unit);
+        outcome.requires_keyframe =
+            next.requires_keyframe || (outcome.requires_keyframe && !next.emitted_sync_access_unit);
     }
     assert!(outcome.emitted_sync_access_unit, "the IDR was decoded");
     assert!(
