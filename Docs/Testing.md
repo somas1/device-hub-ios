@@ -177,6 +177,17 @@ out, repeated cancel and free, and repeated cancellation after a worker panic
 or with no callback dispatcher. Like the Swift tests, these do not show that a
 device physically released input.
 
+## Native video failure classification
+
+`NativeVideoBoundaryTests.nativeFailureConsumerOrdering` uses real native
+control and video streams to consume the same typed native failure media-first
+and control-first. A native failure must keep its existing native mapping
+rather than become a decoder error just because the media consumer runs
+first. Decoder and bridge contract failures keep their existing
+classification. The synthetic fixture does not execute the native callback
+context, FFI or physical teardown, and it does not establish the cause of a
+live display failure. Run it through `mise run test:swift`.
+
 ## Visual coverage
 
 Render and inspect the preview or snapshot matrix for:
