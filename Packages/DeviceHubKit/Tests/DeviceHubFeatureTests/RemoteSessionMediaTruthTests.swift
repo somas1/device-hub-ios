@@ -237,8 +237,8 @@ struct RemoteSessionMediaTruthTests {
             $0.pendingInputCleanup = InputCleanupOwnership(session: session, resumeViewing: true)
             $0.session = nil
         }
-        await store.receive(\.inputCleanupFinished) { $0.pendingInputCleanup = nil }
-        await store.receive(\.startViewingButtonTapped) {
+        await store.receive(\.inputCleanupFinished) {
+            $0.pendingInputCleanup = nil
             $0.session = ActiveRemoteSession(
                 attemptID: nextAttemptID,
                 device: second,

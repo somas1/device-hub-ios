@@ -114,8 +114,10 @@ extension RemoteSessionFeature {
                   owner.attemptID == attemptID, owner.sessionID == sessionID else { return .none }
             state.pendingInputCleanup = nil
             guard owner.resumeViewing, !state.inputCleanupFailed,
-                  state.lifecycle == .active, !state.isViewingStopped else { return .none }
-            return .send(.startViewingButtonTapped)
+                  state.lifecycle == .active, !state.isViewingStopped,
+                  let device = state.selectedDevice else { return .none }
+            // Resume in this reduction so a deferred Start cannot override a later Stop.
+            return beginSessionIfPossible(state: &state, device: device)
 
         case let .inputCleanupFailed(attemptID, sessionID, _):
             let pending = state.pendingInputCleanup

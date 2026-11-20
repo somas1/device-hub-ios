@@ -97,6 +97,9 @@ struct RemoteSessionView: View {
             device: store.selectedDevice,
             frame: store.session?.frame,
             isViewingStopped: store.isViewingStopped,
+            canStartViewing: store.canStartViewing,
+            isInputCleanupPending: store.pendingInputCleanup != nil,
+            isInputCleanupFailed: store.inputCleanupFailed,
             presentation: store.sessionPresentation,
             remediation: store.remediation,
             pairButtonTapped: pairButtonTapped,
@@ -123,6 +126,7 @@ struct RemoteSessionView: View {
         RemoteSessionMenu(
             acceptsInput: store.acceptsInput,
             isViewingStopped: store.isViewingStopped,
+            canStartViewing: store.canStartViewing,
             hasActiveSession: store.session != nil,
             devices: store.roster.devices,
             selectedDeviceID: store.selectedDeviceID,

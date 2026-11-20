@@ -118,8 +118,8 @@ struct RemoteSessionToolbarPresentationTests {
         )
     }
 
-    @Test("Losing the selected device clears the stopped-viewing label")
-    func losingSelectionClearsStoppedViewing() async {
+    @Test("Losing selection preserves Stop but shows no selected device")
+    func losingSelectionPreservesStoppedViewing() async {
         let device = toolbarDevice()
         let store = TestStore(
             initialState: RemoteSessionFeature.State(
@@ -132,15 +132,14 @@ struct RemoteSessionToolbarPresentationTests {
         }
 
         await store.send(.availabilitySnapshotReceived([])) {
-            $0.isViewingStopped = false
             $0.roster = DeviceRoster()
             $0.selectedDeviceID = nil
         }
         expectNoDifference(store.state.toolbarPresentation, .noSelection)
     }
 
-    @Test("An unavailable replacement clears stopped-viewing state")
-    func replacementSelectionClearsStoppedViewing() async {
+    @Test("An unavailable replacement preserves stopped-viewing intent")
+    func replacementSelectionPreservesStoppedViewing() async {
         let first = toolbarDevice(id: "first")
         let replacement = toolbarDevice(
             id: "replacement",
@@ -157,7 +156,6 @@ struct RemoteSessionToolbarPresentationTests {
         }
 
         await store.send(.availabilitySnapshotReceived([replacement])) {
-            $0.isViewingStopped = false
             $0.roster = DeviceRoster(devices: [replacement])
             $0.selectedDeviceID = nil
         }
