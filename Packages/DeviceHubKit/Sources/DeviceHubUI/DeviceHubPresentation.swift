@@ -148,4 +148,33 @@ extension View {
             self
         #endif
     }
+
+    /// Glass behind a small control that floats over the remote screen.
+    ///
+    /// visionOS has no Liquid Glass `glassEffect`, so it uses the system's
+    /// own glass background there.
+    @ViewBuilder
+    func deviceHubOverlayGlass(
+        in shape: some InsettableShape,
+        interactive: Bool = false
+    ) -> some View {
+        #if os(visionOS)
+            glassBackgroundEffect(in: shape)
+        #else
+            glassEffect(
+                interactive ? .regular.interactive() : .regular,
+                in: shape
+            )
+        #endif
+    }
+
+    /// The most prominent button style each platform offers.
+    @ViewBuilder
+    func deviceHubProminentButtonStyle() -> some View {
+        #if os(visionOS)
+            buttonStyle(.borderedProminent)
+        #else
+            buttonStyle(.glassProminent)
+        #endif
+    }
 }

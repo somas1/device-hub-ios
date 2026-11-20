@@ -167,7 +167,7 @@ struct RemoteSessionView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.black.opacity(0.6), in: .capsule)
-        .glassEffect(.regular, in: .capsule)
+        .deviceHubOverlayGlass(in: .capsule)
         .opacity(isHeaderVisible ? 1 : 0)
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
