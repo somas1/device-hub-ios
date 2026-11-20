@@ -87,7 +87,7 @@ struct PairDeviceView: View {
                 Button(actionTitle) {
                     store.send(.remediationButtonTapped)
                 }
-                .buttonStyle(.glassProminent)
+                .deviceHubProminentButtonStyle()
                 .controlSize(.large)
             }
         }
