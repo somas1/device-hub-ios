@@ -29,7 +29,8 @@ uses private, undocumented Apple interfaces.
 - Send taps, drags, and keyboard input.
 - Scroll with two fingers on a trackpad over the remote screen to send a
   one-finger swipe starting at the pointer.
-- Use Home, Lock, Rotate, Siri, mute, and volume controls.
+- Use Home, Lock, Rotate, Siri, mute, and volume controls. With a device
+  selected at regular width, quick controls sit beside More.
 - Preserve controller identity and pairing records securely in Keychain.
 - Adapt the remote experience across iPhone, iPad, portrait, landscape, and
   narrow iPad windows. Portrait iPads remain upright even when their video

@@ -8,7 +8,7 @@ import SwiftUI
     struct RemoteSessionControlSurface: View {
         let showsDirectControls: Bool
         let controls: RemoteSessionFoldedControls
-        let menu: RemoteSessionMenu
+        let menu: RemoteSessionMenu?
 
         var body: some View {
             ZStack {
@@ -19,7 +19,9 @@ import SwiftUI
                 Color.clear
                     .allowsHitTesting(false)
                     .overlay(alignment: .topTrailing) {
-                        menu.equatable().padding(6)
+                        if let menu {
+                            menu.equatable().padding(6)
+                        }
                     }
             }
         }
@@ -102,6 +104,7 @@ struct RemoteSessionFoldedControls: View {
                         isViewingStopped: false,
                         canStartViewing: false,
                         hasActiveSession: true,
+                        showsQuickControls: false,
                         devices: [],
                         selectedDeviceID: nil,
                         aboutButtonTapped: {},

@@ -8,6 +8,7 @@ struct RemoteSessionView: View {
     @Binding var isKeyboardPresented: Bool
     @State private var keyboardFocusRequest = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var isHeaderVisible = true
     @State private var hasActiveDivision = false
 
@@ -65,10 +66,15 @@ struct RemoteSessionView: View {
                     RemoteSessionControlSurface(
                         showsDirectControls: hasActiveDivision && !isKeyboardPresented,
                         controls: foldedControls,
-                        menu: sessionMenu
+                        menu: showsQuickControls ? nil : sessionMenu()
                     )
                 } secondary: {
                     canvasWithHeader
+                        .overlay(alignment: .topTrailing) {
+                            if showsQuickControls {
+                                menuWithQuickControls
+                            }
+                        }
                 }
                 .arrangementViewStyle(.overlay)
                 .onGeometryChange(for: Bool.self) { proxy in
@@ -87,8 +93,39 @@ struct RemoteSessionView: View {
     private var flatSession: some View {
         canvasWithHeader
             .overlay(alignment: .topTrailing) {
-                sessionMenu.equatable().padding(6)
+                if showsQuickControls {
+                    menuWithQuickControls
+                } else {
+                    sessionMenu().equatable().padding(6)
+                }
             }
+    }
+
+    private var showsQuickControls: Bool {
+        !hasActiveDivision && Self.showsQuickControls(
+            horizontalSizeClass: horizontalSizeClass,
+            hasSelectedDevice: store.selectedDevice != nil
+        )
+    }
+
+    nonisolated static func showsQuickControls(
+        horizontalSizeClass: UserInterfaceSizeClass?, hasSelectedDevice: Bool
+    ) -> Bool {
+        horizontalSizeClass == .regular && hasSelectedDevice
+    }
+
+    private var menuWithQuickControls: some View {
+        HStack(spacing: 8) {
+            RemoteSessionQuickControls(
+                acceptsInput: store.acceptsInput,
+                buttonTapped: hardwareButtonTapped,
+                rotateButtonTapped: rotateButtonTapped
+            )
+            .equatable()
+
+            sessionMenu(showsQuickControls: true).equatable()
+        }
+        .padding(6)
     }
 
     private var canvas: some View {
@@ -118,16 +155,18 @@ struct RemoteSessionView: View {
             .overlay(alignment: .top) {
                 floatingHeader
                     .padding(.horizontal, 56)
-                    .padding(.top, 8)
+                    // Leave room for the 44-point row in narrow regular-width windows.
+                    .padding(.top, showsQuickControls ? 58 : 8)
             }
     }
 
-    private var sessionMenu: RemoteSessionMenu {
+    private func sessionMenu(showsQuickControls: Bool = false) -> RemoteSessionMenu {
         RemoteSessionMenu(
             acceptsInput: store.acceptsInput,
             isViewingStopped: store.isViewingStopped,
             canStartViewing: store.canStartViewing,
             hasActiveSession: store.session != nil,
+            showsQuickControls: showsQuickControls,
             devices: store.roster.devices,
             selectedDeviceID: store.selectedDeviceID,
             aboutButtonTapped: aboutButtonTapped,

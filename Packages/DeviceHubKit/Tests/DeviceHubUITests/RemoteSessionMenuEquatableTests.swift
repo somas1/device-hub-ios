@@ -20,6 +20,13 @@ struct RemoteSessionMenuEquatableTests {
         #expect(menu() != menu(hasActiveSession: false))
         #expect(menu() != menu(devices: []))
         #expect(menu() != menu(selectedDeviceID: nil))
+        #expect(menu() != menu(showsQuickControls: true))
+    }
+
+    @Test("More exposes the six actions only when the bar is hidden")
+    func quickControlItemsFollowBarVisibility() {
+        #expect(menu(showsQuickControls: false).showsQuickControlItems)
+        #expect(!menu(showsQuickControls: true).showsQuickControlItems)
     }
 
     private static let target = DeviceSummary(
@@ -36,6 +43,7 @@ struct RemoteSessionMenuEquatableTests {
         isViewingStopped: Bool = false,
         canStartViewing: Bool = true,
         hasActiveSession: Bool = true,
+        showsQuickControls: Bool = false,
         devices: [DeviceSummary] = [target],
         selectedDeviceID: DeviceID? = target.id
     ) -> RemoteSessionMenu {
@@ -44,6 +52,7 @@ struct RemoteSessionMenuEquatableTests {
             isViewingStopped: isViewingStopped,
             canStartViewing: canStartViewing,
             hasActiveSession: hasActiveSession,
+            showsQuickControls: showsQuickControls,
             devices: devices,
             selectedDeviceID: selectedDeviceID,
             aboutButtonTapped: {},
