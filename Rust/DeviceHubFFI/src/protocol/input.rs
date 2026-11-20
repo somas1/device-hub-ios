@@ -205,7 +205,7 @@ pub(super) async fn run_active_control_loop(
                         ).await {
                             Ok(outcome) => {
                                 has_emitted_video_access_unit |= outcome.emitted_access_unit;
-                                for feedback_datagram in feedback.consume(&outcome) {
+                                for feedback_datagram in feedback.consume(&outcome, std::time::Instant::now()) {
                                     if video_udp
                                         .send_to(feedback.peer_port(), feedback_datagram)
                                         .await
@@ -229,11 +229,11 @@ pub(super) async fn run_active_control_loop(
                 }
             }
             _ = feedback_timer.tick() => {
-                if let Some(report) = feedback.periodic_report(
-                    feedback_started_at.elapsed(),
-                ) {
-                    if video_udp.send_to(feedback.peer_port(), report).await.is_err() {
-                        break Err(video_control_delivery_failed());
+                let report = feedback.periodic_report(feedback_started_at.elapsed());
+                let retry = feedback.keyframe_retry(std::time::Instant::now());
+                for datagram in report.into_iter().chain(retry) {
+                    if video_udp.send_to(feedback.peer_port(), datagram).await.is_err() {
+                        break 'stream Err(video_control_delivery_failed());
                     }
                 }
             }

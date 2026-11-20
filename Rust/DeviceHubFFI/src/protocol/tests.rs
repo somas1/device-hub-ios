@@ -1058,9 +1058,11 @@ fn userspace_video_offer_and_feedback_remain_one_owned_protocol() {
         emitted_access_unit: true,
         highest_sequence_number: Some(u16::MAX - 1),
         requires_keyframe: false,
+        ..Default::default()
     };
+    let start = std::time::Instant::now();
     assert_eq!(
-        feedback.consume(&first),
+        feedback.consume(&first, start),
         vec![build_frame_ack(our_ssrc, 0xA0B0_C0D0)]
     );
     assert_eq!(
@@ -1074,7 +1076,7 @@ fn userspace_video_offer_and_feedback_remain_one_owned_protocol() {
         ..Default::default()
     };
     assert_eq!(
-        feedback.consume(&wrapped),
+        feedback.consume(&wrapped, start),
         vec![build_keyframe_request(
             our_ssrc,
             call_id,
@@ -1086,6 +1088,91 @@ fn userspace_video_offer_and_feedback_remain_one_owned_protocol() {
     assert_eq!(
         feedback.periodic_report(Duration::from_millis(100)),
         Some(build_rctl(our_ssrc, 100, 1, 2))
+    );
+}
+
+#[test]
+fn keyframe_requests_repeat_until_a_sync_frame_arrives() {
+    // After a gap the assembler drops every frame until a sync sample, and the
+    // device often ignores a lone request.
+    let (our_ssrc, device_ssrc, call_id) = (0x1020_3040, 0x5060_7080, "call");
+    let mut feedback = VideoFeedbackState::new(our_ssrc, device_ssrc, call_id.into());
+    let start = std::time::Instant::now();
+    let gap = VideoDatagramOutcome {
+        requires_keyframe: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        feedback.consume(&gap, start),
+        vec![build_keyframe_request(our_ssrc, call_id, device_ssrc, &[], 0)]
+    );
+    assert_eq!(feedback.keyframe_retry(start + Duration::from_secs(2)), None);
+    assert_eq!(
+        feedback.keyframe_retry(start + KEYFRAME_RETRY_INTERVAL),
+        Some(build_keyframe_request(our_ssrc, call_id, device_ssrc, &[], 1)),
+        "an ignored keyframe request is repeated"
+    );
+    let synced = VideoDatagramOutcome {
+        emitted_access_unit: true,
+        emitted_sync_access_unit: true,
+        ..Default::default()
+    };
+    feedback.consume(&synced, start + KEYFRAME_RETRY_INTERVAL);
+    assert_eq!(
+        feedback.keyframe_retry(start + Duration::from_secs(60)),
+        None,
+        "a sync frame ends the retries"
+    );
+}
+
+#[test]
+fn a_sync_sample_after_a_gap_in_the_same_batch_needs_no_keyframe_request() {
+    let capture = ProtocolMediaCapture::default();
+    let media = test_media_emitter(&capture);
+    let control = EventEmitterTestFixture::new();
+    let emitter = control.emitter();
+    let mut assembler = HevcAccessUnitAssembler::new(TEST_VIDEO_PAYLOAD_TYPE, TEST_VIDEO_SSRC);
+    let mut last_configuration_revision = 0;
+    let mut geometry = test_geometry();
+    prime_test_video_stream(
+        &mut assembler,
+        &mut last_configuration_revision,
+        &mut geometry,
+        &media,
+        &emitter,
+    );
+
+    // Sequence 4 is lost. The assembler holds later packets until its reorder
+    // buffer overflows, then drains the gap, the IDR at 5 and the frames after
+    // it in one batch: the IDR's configuration needs the orientation, and the
+    // IDR already recovered the picture.
+    let mut outcome = VideoDatagramOutcome::default();
+    let frames = (6u16..=140).map(|sequence| (sequence, test_nal(1, &[0x61])));
+    for (sequence, payload) in std::iter::once((5u16, test_nal(19, &[0xF0]))).chain(frames) {
+        let next = process_video_datagram_outcome(
+            test_rtp_datagram(
+                TEST_VIDEO_PAYLOAD_TYPE,
+                sequence,
+                u32::from(sequence),
+                true,
+                &payload,
+            ),
+            VIDEO_SENDER_PORT,
+            &mut assembler,
+            &mut last_configuration_revision,
+            &mut geometry,
+            &media,
+            &emitter,
+        )
+        .unwrap();
+        outcome.emitted_sync_access_unit |= next.emitted_sync_access_unit;
+        outcome.requires_keyframe = next.requires_keyframe
+            || (outcome.requires_keyframe && !next.emitted_sync_access_unit);
+    }
+    assert!(outcome.emitted_sync_access_unit, "the IDR was decoded");
+    assert!(
+        !outcome.requires_keyframe,
+        "the IDR after the gap already recovered the picture"
     );
 }
 

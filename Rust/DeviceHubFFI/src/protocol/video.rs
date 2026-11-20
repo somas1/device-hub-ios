@@ -5,13 +5,21 @@ pub(super) struct PreparedVideoDatagram {
 }
 
 impl PreparedVideoDatagram {
+    /// Whether emitting these events will send a new video configuration,
+    /// which needs the device orientation. Mirrors emission order: a
+    /// discontinuity resets the emitted revision, so an access unit after it
+    /// re-sends its configuration.
     fn has_new_configuration(&self, last_configuration_revision: u64) -> bool {
-        self.events.iter().any(|event| {
-            matches!(
-                event,
-                HevcDepacketizerEvent::AccessUnit(access_unit)
-                    if access_unit.parameter_set_revision > last_configuration_revision
-            )
+        let mut revision = last_configuration_revision;
+        self.events.iter().any(|event| match event {
+            HevcDepacketizerEvent::Discontinuity(_) => {
+                revision = 0;
+                false
+            }
+            HevcDepacketizerEvent::AccessUnit(access_unit) => {
+                access_unit.parameter_set_revision > revision
+            }
+            HevcDepacketizerEvent::PacketRejected(_) => false,
         })
     }
 }
@@ -27,6 +35,7 @@ pub(super) struct LiveVideoState {
 pub(super) struct VideoDatagramOutcome {
     pub(super) completed_frame_timestamps: Vec<u32>,
     pub(super) emitted_access_unit: bool,
+    pub(super) emitted_sync_access_unit: bool,
     pub(super) highest_sequence_number: Option<u16>,
     pub(super) requires_keyframe: bool,
 }
@@ -45,6 +54,8 @@ pub(super) struct VideoFeedbackState {
     media_ssrc: u32,
     our_ssrc: u32,
     peer_port: u16,
+    // When the last keyframe request went out, while no sync frame has arrived since.
+    pending_keyframe_request: Option<std::time::Instant>,
 }
 
 impl VideoFeedbackState {
@@ -58,10 +69,34 @@ impl VideoFeedbackState {
             media_ssrc,
             our_ssrc,
             peer_port: VIDEO_SENDER_PORT,
+            pending_keyframe_request: None,
         }
     }
 
-    pub(super) fn consume(&mut self, outcome: &VideoDatagramOutcome) -> Vec<Vec<u8>> {
+    /// Re-sends the keyframe request while the decoder is still waiting for one.
+    pub(super) fn keyframe_retry(&mut self, now: std::time::Instant) -> Option<Vec<u8>> {
+        let sent_at = self.pending_keyframe_request?;
+        (now.duration_since(sent_at) >= KEYFRAME_RETRY_INTERVAL).then(|| self.keyframe_request(now))
+    }
+
+    fn keyframe_request(&mut self, now: std::time::Instant) -> Vec<u8> {
+        self.pending_keyframe_request = Some(now);
+        let request = build_keyframe_request(
+            self.our_ssrc,
+            &self.cname,
+            self.media_ssrc,
+            &[],
+            self.fir_sequence_number,
+        );
+        self.fir_sequence_number = self.fir_sequence_number.wrapping_add(1);
+        request
+    }
+
+    pub(super) fn consume(
+        &mut self,
+        outcome: &VideoDatagramOutcome,
+        now: std::time::Instant,
+    ) -> Vec<Vec<u8>> {
         if let Some(sequence_number) = outcome.highest_sequence_number {
             self.observe_sequence_number(sequence_number);
         }
@@ -73,15 +108,11 @@ impl VideoFeedbackState {
             self.frame_count = self.frame_count.wrapping_add(1);
             datagrams.push(build_frame_ack(self.our_ssrc, *timestamp));
         }
+        if outcome.emitted_sync_access_unit {
+            self.pending_keyframe_request = None;
+        }
         if outcome.requires_keyframe {
-            datagrams.push(build_keyframe_request(
-                self.our_ssrc,
-                &self.cname,
-                self.media_ssrc,
-                &[],
-                self.fir_sequence_number,
-            ));
-            self.fir_sequence_number = self.fir_sequence_number.wrapping_add(1);
+            datagrams.push(self.keyframe_request(now));
         }
         datagrams
     }
@@ -260,6 +291,12 @@ pub(super) fn emit_prepared_video_datagram(
                     media.video_configuration(configuration, concrete_orientation)?;
                     emit_display_geometry_if_complete(emitter, *geometry)?;
                 }
+                if access_unit.is_sync {
+                    // A sync sample after an earlier discontinuity in this
+                    // batch already recovered the picture.
+                    outcome.emitted_sync_access_unit = true;
+                    outcome.requires_keyframe = false;
+                }
                 media.video_access_unit(access_unit, *geometry)?;
                 outcome.completed_frame_timestamps.push(rtp_timestamp);
                 outcome.emitted_access_unit = true;
@@ -314,6 +351,41 @@ pub(super) fn process_video_datagram(
         emitter,
     )?
     .emitted_access_unit)
+}
+
+#[cfg(test)]
+pub(super) fn process_video_datagram_outcome(
+    bytes: Vec<u8>,
+    source_port: u16,
+    assembler: &mut HevcAccessUnitAssembler,
+    last_configuration_revision: &mut u64,
+    geometry: &mut DhDisplayGeometry,
+    media: &MediaEmitter,
+    emitter: &EventEmitter,
+) -> Result<VideoDatagramOutcome, PublicFailure> {
+    let Some(prepared) = prepare_video_datagram(
+        bytes,
+        source_port,
+        assembler,
+        last_configuration_revision,
+        media,
+    )?
+    else {
+        return Ok(VideoDatagramOutcome::default());
+    };
+    let orientation = prepared
+        .has_new_configuration(*last_configuration_revision)
+        .then(|| test_orientation_state(*geometry))
+        .transpose()?;
+    emit_prepared_video_datagram(
+        prepared,
+        assembler,
+        last_configuration_revision,
+        geometry,
+        orientation.as_ref(),
+        media,
+        emitter,
+    )
 }
 
 #[cfg(test)]

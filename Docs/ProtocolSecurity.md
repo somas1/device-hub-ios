@@ -143,7 +143,12 @@ visible, typed failure rather than an implicit mounting flow.
   PLIs. Those replies go to the port the device's video datagrams arrive
   from, not the sender port in our offer: the device sends from its own port
   and drops RTCP sent anywhere else, so a keyframe request to the offered port
-  never arrives and the picture stays frozen after packet loss. Swift receives only validated codec configuration and complete HEVC
+  never arrives and the picture stays frozen after packet loss.
+- After a gap, the decoder drops frames until a sync sample, and the device
+  often ignores a lone keyframe request. The request repeats every three
+  seconds until a sync access unit arrives. A sync sample that arrives in the
+  same batch as the gap counts as recovery, and its configuration is sent with
+  a fresh orientation reading. Swift receives only validated codec configuration and complete HEVC
   access units for VideoToolbox decoding.
 - Each decoded frame carries generation, orientation, dimensions, presentation
   time, and receipt time.
