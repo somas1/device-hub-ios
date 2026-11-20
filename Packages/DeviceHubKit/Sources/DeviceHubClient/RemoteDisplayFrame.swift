@@ -8,13 +8,17 @@ import DeviceHubCore
 /// makes sharing this wrapper across tasks safe despite its imported type
 /// lacking a native `Sendable` conformance.
 public struct RemoteDisplayFrame: @unchecked Sendable {
+    /// Turn selected when the pixels are validated; upright-coded producers pass `.upright`.
+    public let displayTurn: DisplayTurn
     public let image: CGImage
     public let metadata: ScreenMetadata
 
     public init(
         metadata: ScreenMetadata,
-        image: CGImage
+        image: CGImage,
+        displayTurn: DisplayTurn
     ) {
+        self.displayTurn = displayTurn
         self.image = image
         self.metadata = metadata
     }

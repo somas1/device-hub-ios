@@ -14,11 +14,14 @@
         let imageWidth: Int
         let orientation: ScreenOrientation
         let pixelSize: PixelSize
+        /// Turn carried by the decoder for this synthetic frame.
+        var displayTurn: DisplayTurn = .upright
     }
 
     enum FixtureRemoteScreen {
         case phonePortrait
         case tabletLandscape
+        case tabletPortraitLandscapeCoded
 
         var geometry: FixtureRemoteGeometry {
             switch self {
@@ -36,6 +39,15 @@
                     imageWidth: 1366,
                     orientation: .landscapeRight,
                     pixelSize: PixelSize(width: 2064, height: 2752)
+                )
+
+            case .tabletPortraitLandscapeCoded:
+                FixtureRemoteGeometry(
+                    imageHeight: 1024,
+                    imageWidth: 1366,
+                    orientation: .portrait,
+                    pixelSize: PixelSize(width: 2064, height: 2752),
+                    displayTurn: .clockwise
                 )
             }
         }
@@ -75,6 +87,7 @@
                  .liveIPadDark,
                  .liveIPhoneDark,
                  .liveLandscapeIPadTargetIPhoneDark,
+                 .livePortraitIPadTargetLandscapeCodedIPadDark,
                  .offlineIPhoneDark,
                  .noticesUnavailableIPhoneDark,
                  .developerImageIncompatibleIPhoneDark,

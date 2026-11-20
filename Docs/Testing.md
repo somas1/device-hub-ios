@@ -211,6 +211,11 @@ event and frame streams stay open until the app disconnects; a completed event
 stream means the remote session ended. The fixture's Settings-like display is
 mock service data, not a screenshot from a physical device.
 
+The visual suite also covers a portrait iPad encoded sideways in a landscape
+frame. Its dedicated `landscapeCodedPortraitIPad` test can record just the new
+reference with `DEVICE_HUB_RECORD_SNAPSHOT_TEST=DeviceHubVisualSnapshotTests/landscapeCodedPortraitIPad`
+and `mise run snapshots:record`; the task then compares the full matrix.
+
 ## Authorized-device verification
 
 Protocol work should also be exercised on dedicated hardware owned by the

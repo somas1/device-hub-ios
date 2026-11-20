@@ -83,7 +83,8 @@ extension RemoteDisplayFrame {
                     orientation: .portrait
                 )
             ),
-            image: image
+            image: image,
+            displayTurn: .upright
         )
     }
 }

@@ -122,7 +122,7 @@ struct RemoteCanvas: View {
                     Image(
                         decorative: frame.image,
                         scale: 1,
-                        orientation: .up
+                        orientation: RemoteScreenLayout.imageOrientation(for: frame)
                     )
                     .resizable()
                     .scaledToFill()
@@ -263,6 +263,16 @@ enum RemoteScreenLayout {
             width: CGFloat(orientedPixels.width) * scale,
             height: CGFloat(orientedPixels.height) * scale
         )
+    }
+}
+
+extension RemoteScreenLayout {
+    static func imageOrientation(for frame: RemoteDisplayFrame) -> Image.Orientation {
+        switch frame.displayTurn {
+        case .upright: .up
+        case .clockwise: .right
+        case .counterclockwise: .left
+        }
     }
 }
 

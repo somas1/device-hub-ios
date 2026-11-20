@@ -180,7 +180,8 @@ func remoteFrame(
                 orientation: orientation
             )
         ),
-        image: image
+        image: image,
+        displayTurn: .upright
     )
 }
 

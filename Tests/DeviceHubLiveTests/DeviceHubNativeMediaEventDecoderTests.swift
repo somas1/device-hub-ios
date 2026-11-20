@@ -553,6 +553,33 @@ struct DeviceHubNativeMediaEventDecoderTests {
         }
     }
 
+    @Test("upright portrait targets may code a landscape-shaped stream")
+    func landscapeCodedPortraitConfiguration() throws {
+        var decoder = DeviceHubNativeMediaEventDecoder(generation: generation)
+        var parameterSets = ParameterSets()
+        let decoded = try decodeConfiguration(
+            with: &decoder, sequence: 1, revision: 1,
+            parameterSets: &parameterSets,
+            mutate: {
+                $0.orientation = DH_ORIENTATION_PORTRAIT
+                $0.pixel_width = 2736
+                $0.pixel_height = 2064
+            }
+        )
+        guard case let .configuration(configuration) = decoded else {
+            Issue.record("Expected a configuration")
+            return
+        }
+        #expect(configuration.orientation == .portrait)
+        #expect(configuration.pixelSize == PixelSize(width: 2064, height: 2736))
+        let mapped = try #require(RemoteCoordinateMapper.mapInitialTouch(
+            Point2D(x: 0, y: 0),
+            in: Viewport(origin: Point2D(x: 0, y: 0), size: Size2D(width: 206.4, height: 273.6)),
+            targetPixels: configuration.pixelSize, orientation: .portrait
+        ))
+        #expect(mapped == TargetPixelPoint(x: 0, y: 0))
+    }
+
     @Test("configuration preserves flat and unresolved valid orientations")
     func configurationOrientation() throws {
         var flatDecoder = DeviceHubNativeMediaEventDecoder(

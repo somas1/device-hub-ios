@@ -30,7 +30,8 @@ uses private, undocumented Apple interfaces.
 - Use Home, Lock, Rotate, Siri, mute, and volume controls.
 - Preserve controller identity and pairing records securely in Keychain.
 - Adapt the remote experience across iPhone, iPad, portrait, landscape, and
-  narrow iPad windows.
+  narrow iPad windows. Portrait iPads remain upright even when their video
+  frames are encoded sideways.
 
 ## Requirements
 

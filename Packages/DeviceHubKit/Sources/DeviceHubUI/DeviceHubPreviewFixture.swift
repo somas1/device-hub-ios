@@ -150,7 +150,8 @@
                 image: Self.abstractScreenImage(
                     width: remoteScreen.imageWidth,
                     height: remoteScreen.imageHeight
-                )
+                ),
+                displayTurn: .upright
             )
             session.remoteState = remoteState
             session.sessionID = DeviceSessionID(

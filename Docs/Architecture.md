@@ -139,3 +139,11 @@ handle was destroyed, not that the device released input.
   for arm64 device and arm64 simulator.
 - Signing configuration is local and never committed. Unsigned simulator builds
   and locally signed device archives use the same generated project.
+
+## Display geometry
+
+Native dimensions describe the target's portrait touch space, even when a
+portrait target encodes landscape-shaped frames. The decoder validates each
+frame and carries its display turn on `RemoteDisplayFrame`. The canvas uses
+that turn as an image orientation without rotating pixel buffers; layout and
+input mapping share the corrected native size and target orientation.

@@ -73,6 +73,48 @@ public enum ScreenOrientation: Codable, CaseIterable, Equatable, Sendable {
     }
 }
 
+/// Quarter turn that shows a decoded frame upright in its oriented layout.
+public enum DisplayTurn: Equatable, Sendable {
+    case upright
+    case clockwise
+    case counterclockwise
+}
+
+public extension ScreenOrientation {
+    /// Turn needed to display `decoded` for a native portrait size, or `nil`
+    /// when the dimensions cannot be displayed.
+    ///
+    /// Some portrait targets encode landscape frames with the screen drawn
+    /// sideways and its top edge on the frame's left.
+    func displayTurn(decoded: PixelSize, native: PixelSize) -> DisplayTurn? {
+        let expected = orientedSize(for: native)
+        if decoded == expected {
+            return .upright
+        }
+        guard decoded == PixelSize(width: expected.height, height: expected.width),
+              decoded.width > decoded.height
+        else {
+            return nil
+        }
+        switch self {
+        case .portrait:
+            return .clockwise
+        case .portraitUpsideDown:
+            // ponytail: inferred from the upright case; not yet observed on a device.
+            return .counterclockwise
+        case .landscapeLeft, .landscapeRight:
+            return nil
+        }
+    }
+}
+
+public extension PixelSize {
+    /// Native portrait size, whichever shape the target encoded.
+    var portraitShaped: PixelSize {
+        width <= height ? self : PixelSize(width: height, height: width)
+    }
+}
+
 /// Result of mapping a view-space gesture to the target's native pixels.
 public struct CoordinateMapping: Equatable, Sendable {
     public var point: TargetPixelPoint

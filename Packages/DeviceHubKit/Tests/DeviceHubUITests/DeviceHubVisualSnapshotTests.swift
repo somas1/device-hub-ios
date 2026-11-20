@@ -28,7 +28,7 @@
     struct DeviceHubVisualSnapshotTests {
         @Test("Screen-first state and viewport matrix")
         func visualMatrix() throws {
-            for scenario in VisualScenario.allCases {
+            for scenario in VisualScenario.allCases where scenario != .livePortraitIPadTargetLandscapeCodedIPadDark {
                 let fixture = try VisualFixture(scenario: scenario)
                 let traits = fixture.traits
 
@@ -47,6 +47,20 @@
                 )
             }
         }
+
+        @Test("Landscape-coded portrait iPad appears upright")
+        func landscapeCodedPortraitIPad() throws {
+            let fixture = try VisualFixture(scenario: .livePortraitIPadTargetLandscapeCodedIPadDark)
+            assertSnapshot(
+                of: fixture.view,
+                as: .image(
+                    precision: 0.99, perceptualPrecision: 0.98,
+                    layout: .fixed(width: fixture.size.width, height: fixture.size.height),
+                    traits: fixture.traits
+                ),
+                named: VisualScenario.livePortraitIPadTargetLandscapeCodedIPadDark.rawValue
+            )
+        }
     }
 
     enum VisualScenario: String, CaseIterable {
@@ -57,6 +71,7 @@
         case liveIPadLight
         case liveIPadDark
         case liveLandscapeIPadTargetIPhoneDark
+        case livePortraitIPadTargetLandscapeCodedIPadDark
         case offlineIPhoneDark
         case lockedIPhoneAccessibility
         case developerModeIPadAccessibility
@@ -220,6 +235,14 @@
                     device: devices.landscapeIPad,
                     presentation: .live,
                     remoteScreen: .tabletLandscape
+                )
+
+            case .livePortraitIPadTargetLandscapeCodedIPadDark:
+                return try sessionState(
+                    roster: roster,
+                    device: devices.landscapeIPad,
+                    presentation: .live,
+                    remoteScreen: .tabletPortraitLandscapeCoded
                 )
 
             case .offlineIPhoneDark:
@@ -410,10 +433,10 @@
             )
             session.frame = try RemoteDisplayFrame(
                 metadata: screenMetadata,
-                image: abstractScreenImage(
-                    width: geometry.imageWidth,
-                    height: geometry.imageHeight
-                )
+                image: geometry.displayTurn == .clockwise
+                    ? sidewaysScreenImage(width: geometry.imageWidth, height: geometry.imageHeight)
+                    : abstractScreenImage(width: geometry.imageWidth, height: geometry.imageHeight),
+                displayTurn: geometry.displayTurn
             )
             session.evaluatedAt = switch presentation {
             case .connecting, .live, .viewingOnly:
@@ -429,6 +452,26 @@
                 session.sessionID = nil
             }
             return session
+        }
+
+        /// Draw the portrait fixture sideways, with its top on the frame's left.
+        private static func sidewaysScreenImage(width: Int, height: Int) throws -> CGImage {
+            let portrait = try abstractScreenImage(width: height, height: width)
+            guard let context = CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                throw VisualFixtureError.imageContextCreationFailed
+            }
+            // Core Graphics is y-up: (x, y) -> (width - y, x).
+            context.translateBy(x: CGFloat(width), y: 0)
+            context.rotate(by: .pi / 2)
+            context.draw(portrait, in: CGRect(x: 0, y: 0, width: height, height: width))
+            guard let image = context.makeImage() else {
+                throw VisualFixtureError.imageCreationFailed
+            }
+            return image
         }
 
         private static func abstractScreenImage(

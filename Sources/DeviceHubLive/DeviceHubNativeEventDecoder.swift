@@ -30,7 +30,8 @@ enum DeviceHubNativeGeometry {
     ) -> PixelSize {
         switch orientation {
         case .portrait, .portraitUpsideDown:
-            encodedPixelSize
+            // Portrait targets may still encode a landscape-shaped stream.
+            encodedPixelSize.portraitShaped
         case .landscapeLeft, .landscapeRight:
             PixelSize(
                 width: encodedPixelSize.height,
