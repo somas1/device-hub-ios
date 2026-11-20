@@ -824,3 +824,288 @@ async fn volume_release_after_turning_lets_go_of_the_button_that_was_pressed() {
         assert!(cleanup.pressed_buttons.is_empty());
     }
 }
+
+/// Orientation service stand-in: answers from a fixed script of replies, then
+/// stays silent, or fails every read.
+#[derive(Debug, Default)]
+struct OrientationSocket {
+    replies: std::collections::VecDeque<Vec<u8>>,
+    fail_reads: bool,
+}
+impl tokio::io::AsyncRead for OrientationSocket {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let socket = self.get_mut();
+        if socket.fail_reads {
+            return std::task::Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()));
+        }
+        match socket.replies.pop_front() {
+            Some(reply) => {
+                buf.put_slice(&reply);
+                std::task::Poll::Ready(Ok(()))
+            }
+            None => std::task::Poll::Pending,
+        }
+    }
+}
+impl tokio::io::AsyncWrite for OrientationSocket {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        bytes: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::task::Poll::Ready(Ok(bytes.len()))
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+/// One orientation reply as an HTTP/2 DATA frame on the XPC reply stream.
+fn orientation_reply(orientation: &str, non_flat_orientation: &str) -> Vec<u8> {
+    let payload = idevice::xpc::Dictionary::from_iter([
+        (
+            "currentDeviceOrientation".to_owned(),
+            XPCObject::String(orientation.into()),
+        ),
+        (
+            "currentDeviceNonFlatOrientation".to_owned(),
+            XPCObject::String(non_flat_orientation.into()),
+        ),
+        (
+            "currentDeviceOrientationLocked".to_owned(),
+            XPCObject::Bool(false),
+        ),
+    ]);
+    let body = idevice::xpc::XPCMessage::new(None, Some(XPCObject::Dictionary(payload)), Some(1))
+        .encode(1)
+        .unwrap();
+    let mut frame = (body.len() as u32).to_be_bytes()[1..].to_vec();
+    frame.extend_from_slice(&[0x00, 0x00, 0, 0, 0, 3]);
+    frame.extend_from_slice(&body);
+    frame
+}
+
+struct LiveLoopRun {
+    /// Set when the loop ended by itself before cancellation.
+    early_result: Option<Result<(), PublicFailure>>,
+    result: Option<Result<(), PublicFailure>>,
+    events_before_cancel: usize,
+    events_after_cancel: usize,
+    cleanup_bytes_after_cancel: usize,
+    teardown: Duration,
+}
+
+/// Runs the real control loop over a configured stream for `cancel_after`,
+/// then cancels it.
+async fn run_live_loop(
+    orientation_socket: OrientationSocket,
+    geometry: DhDisplayGeometry,
+    commands: Vec<ControlCommand>,
+    cancel_after: Duration,
+) -> LiveLoopRun {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    };
+
+    let universal_socket = CleanupSocket::new(Arc::new(AtomicU8::new(0)));
+    let universal_written = universal_socket.written.clone();
+    let universal_stream: Box<dyn idevice::ReadWrite> = Box::new(universal_socket);
+    let indigo_stream: Box<dyn idevice::ReadWrite> =
+        Box::new(CleanupSocket::new(Arc::new(AtomicU8::new(0))));
+    let orientation_stream: Box<dyn idevice::ReadWrite> = Box::new(orientation_socket);
+    let universal = UniversalHidServiceClient::new(
+        idevice::xpc::RemoteXpcClient::new(universal_stream)
+            .await
+            .unwrap(),
+    );
+    let indigo = IndigoHidClient::new(
+        idevice::xpc::RemoteXpcClient::new(indigo_stream)
+            .await
+            .unwrap(),
+    );
+    let orientation = OrientationServiceClient::new(
+        idevice::xpc::RemoteXpcClient::new(orientation_stream)
+            .await
+            .unwrap(),
+    );
+    let adapter = tcp::adapter::Adapter::new(
+        Box::new(CleanupSocket::new(Arc::new(AtomicU8::new(0)))),
+        "fd00::1".parse().unwrap(),
+        "fd00::2".parse().unwrap(),
+    )
+    .to_async_handle();
+    let video_udp = adapter.bind_udp(0).await.unwrap();
+    let (controls, sender, _input_ready) = crate::session::control_gate_test_fixture();
+    controls.enable_input();
+    for command in commands {
+        sender.send(command).await.unwrap();
+    }
+    let (cancel, cancellation) = tokio::sync::watch::channel(false);
+    let fixture = crate::session::EventEmitterTestFixture::new();
+    let emitter = fixture.emitter();
+    let media = MediaEmitter::test_fixture(
+        crate::abi::DhGeneration { high: 1, low: 2 },
+        None,
+        std::ptr::null_mut(),
+    );
+    let video = LiveVideoState {
+        assembler: HevcAccessUnitAssembler::new(96, 1),
+        last_configuration_revision: 1,
+        geometry,
+    };
+    let operation = run_active_control_loop(
+        video_udp,
+        universal,
+        1,
+        indigo,
+        orientation,
+        controls,
+        cancellation,
+        video,
+        VideoFeedbackState::new(1, 2, "synthetic".into()),
+        &emitter,
+        &media,
+    );
+    tokio::pin!(operation);
+    let early_result = tokio::select! {
+        result = &mut operation => Some(result),
+        () = tokio::time::sleep(cancel_after) => None,
+    };
+    let mut run = LiveLoopRun {
+        early_result,
+        result: None,
+        events_before_cancel: fixture.pending_event_count(),
+        events_after_cancel: 0,
+        cleanup_bytes_after_cancel: 0,
+        teardown: Duration::ZERO,
+    };
+    if run.early_result.is_none() {
+        let written_at_cancel = universal_written.load(Ordering::Acquire);
+        cancel.send(true).unwrap();
+        let started = tokio::time::Instant::now();
+        run.result = Some(operation.await);
+        run.teardown = started.elapsed();
+        run.cleanup_bytes_after_cancel =
+            universal_written.load(Ordering::Acquire) - written_at_cancel;
+        run.events_after_cancel = fixture.pending_event_count();
+    }
+    drop(adapter);
+    run
+}
+
+fn landscape_shaped_geometry(orientation: DhOrientation) -> DhDisplayGeometry {
+    DhDisplayGeometry {
+        pixel_width: 1376,
+        pixel_height: 1032,
+        orientation: orientation as u32,
+        non_flat_orientation: orientation as u32,
+        orientation_locked: 0,
+        reserved: [0; 7],
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn periodic_orientation_check_relabels_the_live_stream_once_per_change() {
+    let run = run_live_loop(
+        OrientationSocket {
+            replies: [
+                orientation_reply("portrait", "portrait"),
+                orientation_reply("portrait", "portrait"),
+            ]
+            .into(),
+            fail_reads: false,
+        },
+        landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+        Vec::new(),
+        Duration::from_millis(2_500),
+    )
+    .await;
+    assert!(run.early_result.is_none(), "{:?}", run.early_result);
+    assert_eq!(
+        run.events_before_cancel, 1,
+        "One turn of the iPad publishes exactly one display geometry"
+    );
+    run.result.unwrap().unwrap();
+    assert_eq!(run.events_after_cancel, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_orientation_checks_do_not_end_the_session() {
+    for fail_reads in [true, false] {
+        // false: the service never answers, so every check times out and the
+        // last one is still pending when the session is cancelled.
+        let run = run_live_loop(
+            OrientationSocket {
+                replies: Default::default(),
+                fail_reads,
+            },
+            landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+            vec![ControlCommand::Touch(TouchIntent::Down { x: 1, y: 2 })],
+            Duration::from_millis(4_500),
+        )
+        .await;
+        assert!(
+            run.early_result.is_none(),
+            "fail_reads={fail_reads}: {:?}",
+            run.early_result
+        );
+        assert_eq!(run.events_before_cancel, 0);
+        run.result.unwrap().unwrap();
+        assert!(
+            run.cleanup_bytes_after_cancel > 0,
+            "The held touch is released after cancellation"
+        );
+        assert!(run.teardown <= INPUT_CLEANUP_TIMEOUT);
+        assert_eq!(run.events_after_cancel, 0);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn rotate_reply_relabels_the_live_stream() {
+    let run = run_live_loop(
+        OrientationSocket {
+            replies: [orientation_reply("landscapeLeft", "landscapeLeft")].into(),
+            fail_reads: false,
+        },
+        landscape_shaped_geometry(DhOrientation::Portrait),
+        vec![ControlCommand::Rotate(RotationIntent::Left)],
+        Duration::from_millis(500),
+    )
+    .await;
+    assert!(run.early_result.is_none(), "{:?}", run.early_result);
+    assert_eq!(run.events_before_cancel, 1);
+    run.result.unwrap().unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn rejected_rotation_still_fails_the_session() {
+    let run = run_live_loop(
+        OrientationSocket {
+            replies: Default::default(),
+            fail_reads: true,
+        },
+        landscape_shaped_geometry(DhOrientation::Portrait),
+        vec![ControlCommand::Rotate(RotationIntent::Left)],
+        Duration::from_millis(500),
+    )
+    .await;
+    let failure = run
+        .early_result
+        .expect("A rejected rotation ends the session")
+        .unwrap_err();
+    assert_eq!(failure.code, "rotation_failed");
+}

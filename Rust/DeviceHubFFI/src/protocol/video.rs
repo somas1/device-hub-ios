@@ -423,6 +423,46 @@ pub(super) fn update_geometry_orientation(
     Ok(())
 }
 
+/// Applies an orientation read between video configurations, such as a
+/// periodic check or a rotation reply, and publishes the geometry if it changed.
+///
+/// Turning some iPads keeps the encoder's parameter sets, so no new video
+/// configuration re-reads the orientation. Unlike that path this one is
+/// best effort: a reading with no concrete orientation is ignored, and so is a
+/// landscape label for a portrait-shaped stream, which the app cannot display.
+/// The next video configuration re-reads the orientation in either case.
+pub(super) fn refresh_live_orientation(
+    geometry: &mut DhDisplayGeometry,
+    state: &OrientationState,
+    emitter: &EventEmitter,
+) -> Result<bool, PublicFailure> {
+    let mut next = *geometry;
+    if update_geometry_orientation(&mut next, state).is_err() {
+        return Ok(false);
+    }
+    let landscape = matches!(
+        orientation_from_raw(next.orientation),
+        DhOrientation::LandscapeLeft | DhOrientation::LandscapeRight
+    );
+    if landscape && next.pixel_width < next.pixel_height {
+        return Ok(false);
+    }
+    let changed = (
+        next.orientation,
+        next.non_flat_orientation,
+        next.orientation_locked,
+    ) != (
+        geometry.orientation,
+        geometry.non_flat_orientation,
+        geometry.orientation_locked,
+    );
+    if changed {
+        *geometry = next;
+        emit_display_geometry_if_complete(emitter, next)?;
+    }
+    Ok(changed)
+}
+
 /// Publishes only geometry that is usable for coordinate mapping.
 pub(super) fn emit_display_geometry_if_complete(
     emitter: &EventEmitter,
