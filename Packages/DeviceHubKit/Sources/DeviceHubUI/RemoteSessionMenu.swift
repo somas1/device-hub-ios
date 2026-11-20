@@ -2,7 +2,7 @@ import DeviceHubCore
 import SwiftUI
 
 /// The only persistent control; all device actions live inside its menu.
-struct RemoteSessionMenu: View {
+struct RemoteSessionMenu: View, Equatable {
     let acceptsInput: Bool
     let isViewingStopped: Bool
     let canStartViewing: Bool
@@ -20,12 +20,24 @@ struct RemoteSessionMenu: View {
     let startViewingButtonTapped: () -> Void
     let stopViewingButtonTapped: () -> Void
 
+    /// Compares only what the menu shows. Its parent redraws on every video
+    /// frame with fresh closures; treating those as changes rebuilt the menu
+    /// while it was open.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.acceptsInput == rhs.acceptsInput
+            && lhs.isViewingStopped == rhs.isViewingStopped
+            && lhs.canStartViewing == rhs.canStartViewing
+            && lhs.hasActiveSession == rhs.hasActiveSession
+            && lhs.devices == rhs.devices
+            && lhs.selectedDeviceID == rhs.selectedDeviceID
+    }
+
     var body: some View {
         menu
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.85))
             .background(.black.opacity(0.58), in: .circle)
-            .deviceHubOverlayGlass(in: .circle, interactive: true)
+            .deviceHubOverlayGlass(in: .circle)
     }
 
     private var menu: some View {

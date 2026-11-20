@@ -213,6 +213,14 @@ displacement, and release on terminal callbacks.
 Use a physical trackpad to verify scroll direction, lift behavior, interaction
 with clicks and drags, and the remote device's response.
 
+## More menu stability
+
+The session view redraws on every video frame. `RemoteSessionMenuEquatableTests`
+checks that the More menu compares equal when only its closures are new and
+differs when any visible content changes, so SwiftUI does not rebuild an open
+menu between frames. Whether an open menu stays steady during live video can
+only be confirmed by hand on a device.
+
 ## Visual coverage
 
 Render and inspect the preview or snapshot matrix for:
