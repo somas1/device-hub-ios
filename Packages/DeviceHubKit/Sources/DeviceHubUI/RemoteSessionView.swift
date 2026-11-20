@@ -6,6 +6,7 @@ import SwiftUI
 struct RemoteSessionView: View {
     @Bindable var store: StoreOf<RemoteSessionFeature>
     @Binding var isKeyboardPresented: Bool
+    @State private var keyboardFocusRequest = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHeaderVisible = true
     @State private var hasActiveDivision = false
@@ -17,9 +18,13 @@ struct RemoteSessionView: View {
     var body: some View {
         sessionArrangement
             .overlay {
-                if isKeyboardPresented {
+                if Self.showsKeyboardReceiver(
+                    acceptsInput: store.acceptsInput,
+                    isKeyboardPresented: isKeyboardPresented
+                ) {
                     DeviceKeyboardReceiver(
                         isPresented: $isKeyboardPresented,
+                        focusRequest: keyboardFocusRequest,
                         keyChanged: keyChanged,
                         keyTapped: keyTapped
                     )
@@ -229,11 +234,21 @@ struct RemoteSessionView: View {
         store.send(.stopViewingButtonTapped)
     }
 
+    /// Keeps hardware keys (including a Mac keyboard shared through Mac
+    /// Virtual Display) live whenever the session accepts input.
+    nonisolated static func showsKeyboardReceiver(acceptsInput: Bool, isKeyboardPresented: Bool) -> Bool {
+        acceptsInput || isKeyboardPresented
+    }
+
     private func tap(_ point: Point2D, _ viewport: Viewport) {
+        keyboardFocusRequest += 1
         store.send(.tap(point: point, viewport: viewport))
     }
 
     private func touch(_ contactID: UInt8, _ phase: TouchPhase, _ point: Point2D, _ viewport: Viewport) {
+        if phase == .began {
+            keyboardFocusRequest += 1
+        }
         store.send(.touch(contactID: contactID, phase: phase, point: point, viewport: viewport))
     }
 }

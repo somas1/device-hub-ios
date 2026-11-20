@@ -44,6 +44,16 @@ There is no dashboard and no Devices, Control, Logs, or Settings tab bar.
   app.
 - Clipboard transfer is explicit. Automatic clipboard synchronization is not a
   first-release feature.
+- Hardware keyboards, including a Mac keyboard shared through Mac Virtual
+  Display, type on the remote device whenever input is enabled; the Keyboard
+  control is needed only for the on-screen keyboard. If another controller
+  control takes focus, it keeps Tab and arrow keys until the user taps or
+  touches the remote screen. While Device Hub holds focus, Tab goes to the
+  remote device. The on-screen keyboard's Done and system dismiss keys hide it
+  without dropping hardware keys. Keys are not forwarded while a sheet or alert
+  covers the window, and focus returns after it closes. Held keys are released
+  when the scene deactivates or the window resigns key. Paste is refused unless
+  the on-screen keyboard is shown; then it types the clipboard to the device.
 
 ## Primary controls
 
