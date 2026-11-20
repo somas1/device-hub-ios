@@ -27,6 +27,8 @@ uses private, undocumented Apple interfaces.
 - Discover, pair, and reconnect to compatible devices on the local network.
 - View a clean initial screenshot followed by a live HEVC display stream.
 - Send taps, drags, and keyboard input.
+- Scroll with two fingers on a trackpad over the remote screen to send a
+  one-finger swipe starting at the pointer.
 - Use Home, Lock, Rotate, Siri, mute, and volume controls.
 - Preserve controller identity and pairing records securely in Keychain.
 - Adapt the remote experience across iPhone, iPad, portrait, landscape, and

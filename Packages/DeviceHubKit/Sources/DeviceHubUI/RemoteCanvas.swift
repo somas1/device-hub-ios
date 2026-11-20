@@ -182,58 +182,6 @@ struct RemoteCanvas: View {
     }
 }
 
-struct RemoteActiveTouch: Equatable {
-    let contactID: UInt8
-    var lastPoint: Point2D
-    let viewport: Viewport
-}
-
-/// Local gesture ownership that cannot outlive remote input authorization.
-struct RemoteTouchLedger {
-    private(set) var activeTouch: RemoteActiveTouch?
-
-    /// Starts a contact only when no gesture is currently owned.
-    mutating func beginIfNeeded(
-        contactID: UInt8,
-        at point: Point2D,
-        viewport: Viewport
-    ) -> RemoteActiveTouch? {
-        guard activeTouch == nil else {
-            return nil
-        }
-        let touch = RemoteActiveTouch(
-            contactID: contactID,
-            lastPoint: point,
-            viewport: viewport
-        )
-        activeTouch = touch
-        return touch
-    }
-
-    mutating func updateLastPoint(_ point: Point2D) {
-        activeTouch?.lastPoint = point
-    }
-
-    /// Ends local ownership and returns the contact to terminate remotely.
-    mutating func removeActiveTouch() -> RemoteActiveTouch? {
-        defer {
-            activeTouch = nil
-        }
-        return activeTouch
-    }
-
-    /// Revokes a contact exactly when input transitions from allowed to denied.
-    mutating func revokeInput(
-        from oldValue: Bool,
-        to newValue: Bool
-    ) -> RemoteActiveTouch? {
-        guard oldValue, !newValue else {
-            return nil
-        }
-        return removeActiveTouch()
-    }
-}
-
 /// Pure aspect-fit layout shared by the rendered screen and its input surface.
 enum RemoteScreenLayout {
     static func size(
@@ -329,6 +277,12 @@ private struct RemoteInputModifier: ViewModifier {
             content
                 .simultaneousGesture(tapGesture)
                 .simultaneousGesture(dragGesture)
+                .modifier(RemoteTrackpadScrollModifier(
+                    touchLedger: $touchLedger,
+                    acceptsInput: acceptsInput,
+                    viewport: viewport,
+                    touch: touch
+                ))
         } else {
             content
         }
@@ -359,11 +313,11 @@ private struct RemoteInputModifier: ViewModifier {
                 }
 
                 let point = value.location.point2D
-                touchLedger.updateLastPoint(point)
+                guard touchLedger.updateLastPoint(point) else { return }
                 touch(0, .moved, point, viewport)
             }
             .onEnded { value in
-                guard let activeTouch = touchLedger.removeActiveTouch()
+                guard let activeTouch = touchLedger.removeDrag()
                 else {
                     return
                 }

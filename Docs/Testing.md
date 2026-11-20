@@ -188,6 +188,19 @@ classification. The synthetic fixture does not execute the native callback
 context, FFI or physical teardown, and it does not establish the cause of a
 live display failure. Run it through `mise run test:swift`.
 
+## Continuous trackpad scrolling
+
+`RemoteScrollGestureTests` runs on the host and covers cumulative translation
+from the pointer, drag and scroll contact ownership, cancellation, input
+revocation, invalid geometry, and the existing coordinate mapper.
+`RemoteTrackpadScrollTests` runs under the `DeviceHubVisualSnapshotTests` suite
+selected by `mise run test:app`. Its synthetic UIKit callbacks check the
+continuous-only recognizer configuration, immediate forwarding of the first
+displacement, and release on terminal callbacks.
+
+Use a physical trackpad to verify scroll direction, lift behavior, interaction
+with clicks and drags, and the remote device's response.
+
 ## Visual coverage
 
 Render and inspect the preview or snapshot matrix for:
