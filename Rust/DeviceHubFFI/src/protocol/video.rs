@@ -721,3 +721,20 @@ pub(super) const fn video_negotiation_rejected() -> PublicFailure {
         "The authenticated display service rejected the receiver's video offer.",
     )
 }
+
+/// Whether an established video stream has gone silent for too long.
+pub(super) fn video_stream_stalled(
+    last_datagram: std::time::Instant,
+    now: std::time::Instant,
+) -> bool {
+    now.saturating_duration_since(last_datagram) >= MEDIA_STALL_TIMEOUT
+}
+
+pub(super) const fn media_stalled() -> PublicFailure {
+    PublicFailure::new(
+        "media_stalled",
+        "video_stream",
+        true,
+        "The authenticated video stream stopped delivering datagrams.",
+    )
+}

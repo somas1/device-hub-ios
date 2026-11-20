@@ -167,6 +167,7 @@ public struct NativeSessionFailure:
         "input_service_connect_failed",
         "media_callback_unavailable",
         "media_sequence_exhausted",
+        "media_stalled",
         "orientation_service_connect_failed",
         "orientation_query_failed",
         "pair_record_commit_failed",

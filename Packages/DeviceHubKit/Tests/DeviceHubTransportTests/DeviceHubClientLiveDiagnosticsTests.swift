@@ -34,6 +34,13 @@ extension DeviceHubClientLiveTests {
         }
     }
 
+    @Test("a silent video stream is reported as a paused live view, not a connection failure")
+    func silentVideoStreamMapsToMediaStalled() {
+        let failure = NativeSessionFailure(code: "media_stalled", stage: "video_stream", retryable: true)
+        #expect(failure.code == "media_stalled")
+        #expect(mapNativeFailure(failure) == .mediaStalled)
+    }
+
     @Test("native video failures retain their exact redacted wire phase")
     func nativeVideoFailurePhases() {
         let mappings: [(String, DiagnosticStage)] = [

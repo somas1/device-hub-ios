@@ -1092,6 +1092,27 @@ fn userspace_video_offer_and_feedback_remain_one_owned_protocol() {
 }
 
 #[test]
+fn a_silent_video_socket_stalls_only_after_the_timeout() {
+    // The device keeps sending RTCP sender reports while the screen is static,
+    // so a silent video socket means the path is gone.
+    let start = std::time::Instant::now();
+    assert!(!video_stream_stalled(start, start));
+    assert!(!video_stream_stalled(
+        start,
+        start + MEDIA_STALL_TIMEOUT - Duration::from_millis(1)
+    ));
+    assert!(video_stream_stalled(start, start + MEDIA_STALL_TIMEOUT));
+    assert!(
+        !video_stream_stalled(start + Duration::from_secs(1), start),
+        "a datagram newer than the tick is not a stall"
+    );
+    let failure = media_stalled();
+    assert_eq!(failure.code, "media_stalled");
+    assert_eq!(failure.stage, "video_stream");
+    assert!(failure.retryable);
+}
+
+#[test]
 fn keyframe_requests_repeat_until_a_sync_frame_arrives() {
     // After a gap the assembler drops every frame until a sync sample, and the
     // device often ignores a lone request.
