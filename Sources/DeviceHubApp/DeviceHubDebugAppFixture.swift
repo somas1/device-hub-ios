@@ -117,7 +117,8 @@
                     image: makeRemoteScreenImage(
                         width: pixelSize.width,
                         height: pixelSize.height
-                    )
+                    ),
+                    displayTurn: .upright
                 )
             )
 
@@ -257,7 +258,13 @@
                     feedback: command
                 )
                 eventSink.yield(SessionUpdate(generation: metadata.generation, event: .videoFrame(metadata)))
-                frameSink.yield(RemoteDisplayFrame(metadata: .videoFrame(metadata), image: image))
+                frameSink.yield(
+                    RemoteDisplayFrame(
+                        metadata: .videoFrame(metadata),
+                        image: image,
+                        displayTurn: .upright
+                    )
+                )
             }
         }
 

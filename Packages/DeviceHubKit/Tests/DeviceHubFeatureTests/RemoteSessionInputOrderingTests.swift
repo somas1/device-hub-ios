@@ -356,7 +356,8 @@ private struct AtomicInputFixture {
                     orientation: .portrait
                 )
             ),
-            image: image
+            image: image,
+            displayTurn: .upright
         )
     }
 }

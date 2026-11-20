@@ -347,7 +347,8 @@ actor RemoteSessionOperation {
             )
             frameContinuation.yield(RemoteDisplayFrame(
                 metadata: .screenshot(metadata),
-                image: image
+                image: image,
+                displayTurn: .upright
             ))
             try emit(.screenshot(metadata))
 

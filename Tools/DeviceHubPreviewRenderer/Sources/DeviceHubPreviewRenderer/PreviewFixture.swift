@@ -314,7 +314,8 @@ enum PreviewFixture {
             image: remoteScreenImage(
                 width: geometry.imageWidth,
                 height: geometry.imageHeight
-            )
+            ),
+            displayTurn: .upright
         )
         session.remoteState = remoteState
         session.sessionID = try DeviceSessionID(

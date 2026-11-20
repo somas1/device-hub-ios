@@ -9,6 +9,58 @@ import Testing
 import VideoToolbox
 
 struct HEVCVideoDecoderTests {
+    @Test(arguments: [ScreenOrientation.portrait, .portraitUpsideDown])
+    func acceptsLandscapeCodedPortraitFrame(orientation: ScreenOrientation) async throws {
+        let pair = AsyncThrowingStream.makeStream(of: RemoteDisplayFrame.self, throwing: Error.self)
+        let gate = FrameDeliveryGate(continuation: pair.continuation)
+        defer { gate.finish() }
+        gate.activate(token: 1)
+        try gate.receive(
+            token: 1, status: noErr, infoFlags: [],
+            imageBuffer: makePixelBuffer(width: 96, height: 64),
+            metadata: FrameMetadata(
+                generation: .fixture(), sequenceNumber: 1, receivedAt: .distantPast,
+                pixelSize: PixelSize(width: 64, height: 96), orientation: orientation
+            )
+        )
+        #expect(gate.terminalError == nil)
+        gate.finish()
+        var frames = pair.stream.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(frame.image.width == 96)
+        #expect(frame.image.height == 64)
+        #expect(frame.metadata.pixelSize == PixelSize(width: 64, height: 96))
+    }
+
+    @Test(arguments: [
+        (96, 64, ScreenOrientation.portrait, DisplayTurn.clockwise),
+        (64, 96, ScreenOrientation.portrait, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.landscapeLeft, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.landscapeRight, DisplayTurn.upright),
+        (64, 96, ScreenOrientation.portraitUpsideDown, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.portraitUpsideDown, DisplayTurn.counterclockwise)
+    ])
+    func publishedFrameCarriesValidatedDisplayTurn(
+        width: Int, height: Int, orientation: ScreenOrientation, expected: DisplayTurn
+    ) async throws {
+        let pair = AsyncThrowingStream.makeStream(of: RemoteDisplayFrame.self, throwing: Error.self)
+        let gate = FrameDeliveryGate(continuation: pair.continuation)
+        defer { gate.finish() }
+        gate.activate(token: 1)
+        try gate.receive(
+            token: 1, status: noErr, infoFlags: [],
+            imageBuffer: makePixelBuffer(width: width, height: height),
+            metadata: FrameMetadata(
+                generation: .fixture(), sequenceNumber: 1, receivedAt: .distantPast,
+                pixelSize: PixelSize(width: 64, height: 96), orientation: orientation
+            )
+        )
+        gate.finish()
+        var frames = pair.stream.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(frame.displayTurn == expected)
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func decodesARealGeneratedHEVCFrame() async throws {
         let generation = SessionGeneration.fixture()

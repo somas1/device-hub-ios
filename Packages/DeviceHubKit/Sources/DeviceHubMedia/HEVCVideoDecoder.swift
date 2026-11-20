@@ -497,12 +497,10 @@ final class FrameDeliveryGate: @unchecked Sendable {
             return
         }
 
-        let expectedSize = metadata.orientation.orientedSize(
-            for: metadata.pixelSize
-        )
-        guard image.width == expectedSize.width,
-              image.height == expectedSize.height
-        else {
+        guard let displayTurn = metadata.orientation.displayTurn(
+            decoded: PixelSize(width: image.width, height: image.height),
+            native: metadata.pixelSize
+        ) else {
             fail(token: token, error: .decodedDimensionsMismatch)
             return
         }
@@ -514,7 +512,8 @@ final class FrameDeliveryGate: @unchecked Sendable {
         publish(
             RemoteDisplayFrame(
                 metadata: .videoFrame(metadata),
-                image: image
+                image: image,
+                displayTurn: displayTurn
             ),
             token: token
         )
