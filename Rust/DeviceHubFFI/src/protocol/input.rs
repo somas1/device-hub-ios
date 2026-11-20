@@ -194,6 +194,7 @@ pub(super) async fn run_active_control_loop(
             datagram = video_udp.recv() => {
                 match datagram {
                     Ok(datagram) => {
+                        feedback.observe_source_port(datagram.source_port);
                         match process_live_video_datagram(
                             datagram.data,
                             datagram.source_port,
@@ -206,7 +207,7 @@ pub(super) async fn run_active_control_loop(
                                 has_emitted_video_access_unit |= outcome.emitted_access_unit;
                                 for feedback_datagram in feedback.consume(&outcome) {
                                     if video_udp
-                                        .send_to(VIDEO_SENDER_PORT, feedback_datagram)
+                                        .send_to(feedback.peer_port(), feedback_datagram)
                                         .await
                                         .is_err()
                                     {
@@ -231,7 +232,7 @@ pub(super) async fn run_active_control_loop(
                 if let Some(report) = feedback.periodic_report(
                     feedback_started_at.elapsed(),
                 ) {
-                    if video_udp.send_to(VIDEO_SENDER_PORT, report).await.is_err() {
+                    if video_udp.send_to(feedback.peer_port(), report).await.is_err() {
                         break Err(video_control_delivery_failed());
                     }
                 }
@@ -257,7 +258,7 @@ pub(super) async fn run_active_control_loop(
                 if let Err(failure) = handle_control_command(
                         command,
                         &video_udp,
-                        VIDEO_SENDER_PORT,
+                        feedback.peer_port(),
                         &mut universal_hid,
                         keyboard_service_id,
                         &mut indigo_hid,

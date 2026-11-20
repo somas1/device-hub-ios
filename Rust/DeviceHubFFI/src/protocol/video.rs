@@ -44,6 +44,7 @@ pub(super) struct VideoFeedbackState {
     highest_extended_sequence_number: u32,
     media_ssrc: u32,
     our_ssrc: u32,
+    peer_port: u16,
 }
 
 impl VideoFeedbackState {
@@ -56,6 +57,7 @@ impl VideoFeedbackState {
             highest_extended_sequence_number: 0,
             media_ssrc,
             our_ssrc,
+            peer_port: VIDEO_SENDER_PORT,
         }
     }
 
@@ -93,6 +95,17 @@ impl VideoFeedbackState {
             self.frame_count,
             self.highest_extended_sequence_number as u16,
         ))
+    }
+
+    /// Port that receives our keyframe requests and reports.
+    pub(super) fn peer_port(&self) -> u16 {
+        self.peer_port
+    }
+
+    /// The device sends RTP and RTCP from its own port and silently drops RTCP
+    /// sent to the senderPort we offered, so replies follow its datagrams.
+    pub(super) fn observe_source_port(&mut self, source_port: u16) {
+        self.peer_port = source_port;
     }
 
     fn observe_sequence_number(&mut self, sequence_number: u16) {
