@@ -16,8 +16,9 @@ The app hard-targets iOS/iPadOS 27 and uses current SwiftUI directly:
   live connection, and stays visible when the connection needs attention;
 - transformed `onGeometryChange` values only when layout geometry must enter
   feature state;
-- a 44-point More menu near the top-right corner, with a quick control capsule
-  beside it at regular width when a device is selected;
+- a 44-point More menu near the top-right corner that includes Rotate, with
+  five quick controls in a capsule beside it at regular width when a device
+  is selected;
 - no bottom action bar, trailing control rail, or app-added canvas padding.
 
 On iPhone Duo 27.1, an overlay `ArrangementView` separates the existing canvas

@@ -249,12 +249,13 @@ missing, clipped, or overlapping content.
 
 App integration launches the live fixture on a fresh iPhone simulator at compact
 width and checks that Home, Lock, Keyboard, and Rotate appear only after opening
-More Controls. Snapshot tests cover the regular-width layout and the bar's
-enabled and disabled appearance. The live fixture uses the production
-navigation root and never connects to a real device. Its session
-event and frame streams stay open until the app disconnects; a completed event
-stream means the remote session ended. The fixture's Settings-like display is
-mock service data, not a screenshot from a physical device.
+More Controls. Snapshot tests cover the five-button bar at regular width with
+input enabled and disabled. Unit tests check that Rotate stays in More at both
+widths. The live fixture uses the production navigation root and never connects
+to a real device. Its session event and frame streams stay open until the app
+disconnects; a completed event stream means the remote session ended. The
+fixture's Settings-like display is mock service data, not a screenshot from a
+physical device.
 
 The visual suite also covers a portrait iPad encoded sideways in a landscape
 frame. Run `DEVICE_HUB_RECORD_SNAPSHOT_TEST='DeviceHubVisualSnapshotTests/landscapeCodedPortraitIPad()' mise run snapshots:record`

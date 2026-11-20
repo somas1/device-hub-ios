@@ -3,11 +3,16 @@ import SwiftUI
 
 /// The corner menu carries session options and actions outside the quick controls.
 struct RemoteSessionMenu: View, Equatable {
+    enum ControlItem: CaseIterable {
+        case home, lock, keyboard, rotate
+    }
+
     let acceptsInput: Bool
     let isViewingStopped: Bool
     let canStartViewing: Bool
     let hasActiveSession: Bool
-    let showsQuickControls: Bool
+    /// Hides Home, Lock, Volume Up, Volume Down, and Mute when the bar shows them.
+    let hidesQuickControlItems: Bool
     let devices: [DeviceSummary]
     let selectedDeviceID: DeviceID?
     let aboutButtonTapped: () -> Void
@@ -22,7 +27,14 @@ struct RemoteSessionMenu: View, Equatable {
     let stopViewingButtonTapped: () -> Void
 
     var showsQuickControlItems: Bool {
-        !showsQuickControls
+        !hidesQuickControlItems
+    }
+
+    var controlItems: [ControlItem] {
+        guard selectedDeviceID != nil else {
+            return []
+        }
+        return showsQuickControlItems ? ControlItem.allCases : [.keyboard, .rotate]
     }
 
     /// Compares only what the menu shows. Its parent redraws on every video
@@ -33,7 +45,7 @@ struct RemoteSessionMenu: View, Equatable {
             && lhs.isViewingStopped == rhs.isViewingStopped
             && lhs.canStartViewing == rhs.canStartViewing
             && lhs.hasActiveSession == rhs.hasActiveSession
-            && lhs.showsQuickControls == rhs.showsQuickControls
+            && lhs.hidesQuickControlItems == rhs.hidesQuickControlItems
             && lhs.devices == rhs.devices
             && lhs.selectedDeviceID == rhs.selectedDeviceID
     }
@@ -48,22 +60,20 @@ struct RemoteSessionMenu: View, Equatable {
 
     private var menu: some View {
         Menu {
-            if selectedDeviceID != nil {
+            let items = controlItems
+            if !items.isEmpty {
                 Section("Controls") {
-                    if showsQuickControlItems {
-                        Button("Home", systemImage: "house") {
-                            buttonTapped(.home)
+                    ForEach(items, id: \.self) { item in
+                        switch item {
+                        case .home:
+                            Button("Home", systemImage: "house") { buttonTapped(.home) }
+                        case .lock:
+                            Button("Lock", systemImage: "lock") { buttonTapped(.lock) }
+                        case .keyboard:
+                            Button("Keyboard", systemImage: "keyboard", action: keyboardButtonTapped)
+                        case .rotate:
+                            Button("Rotate", systemImage: "rotate.right", action: rotateButtonTapped)
                         }
-
-                        Button("Lock", systemImage: "lock") {
-                            buttonTapped(.lock)
-                        }
-                    }
-
-                    Button("Keyboard", systemImage: "keyboard", action: keyboardButtonTapped)
-
-                    if showsQuickControlItems {
-                        Button("Rotate", systemImage: "rotate.right", action: rotateButtonTapped)
                     }
                 }
                 .disabled(!acceptsInput)

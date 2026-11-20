@@ -104,7 +104,7 @@ struct RemoteSessionFoldedControls: View {
                         isViewingStopped: false,
                         canStartViewing: false,
                         hasActiveSession: true,
-                        showsQuickControls: false,
+                        hidesQuickControlItems: false,
                         devices: [],
                         selectedDeviceID: nil,
                         aboutButtonTapped: {},

@@ -6,12 +6,19 @@ import Testing
 struct RemoteSessionQuickControlsTests {
     @Test("Only input availability changes quick control identity")
     func comparesInputAvailability() {
-        let enabled = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in }, rotateButtonTapped: {})
-        let enabledAgain = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in }, rotateButtonTapped: {})
-        let disabled = RemoteSessionQuickControls(acceptsInput: false, buttonTapped: { _ in }, rotateButtonTapped: {})
+        let enabled = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in })
+        let enabledAgain = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in })
+        let disabled = RemoteSessionQuickControls(acceptsInput: false, buttonTapped: { _ in })
 
         #expect(enabled == enabledAgain)
         #expect(enabled != disabled)
+    }
+
+    @Test("The bar fits five 44-point buttons with four gaps")
+    func fitsFiveButtons() {
+        let controls = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in })
+
+        #expect(ImageRenderer(content: controls).cgImage?.width == 5 * 44 + 4 * 8)
     }
 
     @Test("Quick controls require regular width and a selected device")

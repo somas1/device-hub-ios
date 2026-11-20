@@ -20,13 +20,21 @@ struct RemoteSessionMenuEquatableTests {
         #expect(menu() != menu(hasActiveSession: false))
         #expect(menu() != menu(devices: []))
         #expect(menu() != menu(selectedDeviceID: nil))
-        #expect(menu() != menu(showsQuickControls: true))
+        #expect(menu() != menu(hidesQuickControlItems: true))
     }
 
-    @Test("More exposes the six actions only when the bar is hidden")
+    @Test("More hides the five quick actions while the bar is visible")
     func quickControlItemsFollowBarVisibility() {
-        #expect(menu(showsQuickControls: false).showsQuickControlItems)
-        #expect(!menu(showsQuickControls: true).showsQuickControlItems)
+        #expect(menu(hidesQuickControlItems: false).showsQuickControlItems)
+        #expect(!menu(hidesQuickControlItems: true).showsQuickControlItems)
+    }
+
+    @Test("More keeps Rotate after Keyboard in both layouts")
+    func rotateStaysInMore() {
+        #expect(menu(hidesQuickControlItems: false).controlItems == [.home, .lock, .keyboard, .rotate])
+        #expect(menu(hidesQuickControlItems: true).controlItems == [.keyboard, .rotate])
+        #expect(menu(acceptsInput: false, hidesQuickControlItems: true).controlItems == [.keyboard, .rotate])
+        #expect(menu(selectedDeviceID: nil).controlItems.isEmpty)
     }
 
     private static let target = DeviceSummary(
@@ -43,7 +51,7 @@ struct RemoteSessionMenuEquatableTests {
         isViewingStopped: Bool = false,
         canStartViewing: Bool = true,
         hasActiveSession: Bool = true,
-        showsQuickControls: Bool = false,
+        hidesQuickControlItems: Bool = false,
         devices: [DeviceSummary] = [target],
         selectedDeviceID: DeviceID? = target.id
     ) -> RemoteSessionMenu {
@@ -52,7 +60,7 @@ struct RemoteSessionMenuEquatableTests {
             isViewingStopped: isViewingStopped,
             canStartViewing: canStartViewing,
             hasActiveSession: hasActiveSession,
-            showsQuickControls: showsQuickControls,
+            hidesQuickControlItems: hidesQuickControlItems,
             devices: devices,
             selectedDeviceID: selectedDeviceID,
             aboutButtonTapped: {},

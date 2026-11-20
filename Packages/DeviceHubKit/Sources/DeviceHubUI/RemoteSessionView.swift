@@ -118,12 +118,11 @@ struct RemoteSessionView: View {
         HStack(spacing: 8) {
             RemoteSessionQuickControls(
                 acceptsInput: store.acceptsInput,
-                buttonTapped: hardwareButtonTapped,
-                rotateButtonTapped: rotateButtonTapped
+                buttonTapped: hardwareButtonTapped
             )
             .equatable()
 
-            sessionMenu(showsQuickControls: true).equatable()
+            sessionMenu(hidesQuickControlItems: true).equatable()
         }
         .padding(6)
     }
@@ -160,13 +159,13 @@ struct RemoteSessionView: View {
             }
     }
 
-    private func sessionMenu(showsQuickControls: Bool = false) -> RemoteSessionMenu {
+    private func sessionMenu(hidesQuickControlItems: Bool = false) -> RemoteSessionMenu {
         RemoteSessionMenu(
             acceptsInput: store.acceptsInput,
             isViewingStopped: store.isViewingStopped,
             canStartViewing: store.canStartViewing,
             hasActiveSession: store.session != nil,
-            showsQuickControls: showsQuickControls,
+            hidesQuickControlItems: hidesQuickControlItems,
             devices: store.roster.devices,
             selectedDeviceID: store.selectedDeviceID,
             aboutButtonTapped: aboutButtonTapped,

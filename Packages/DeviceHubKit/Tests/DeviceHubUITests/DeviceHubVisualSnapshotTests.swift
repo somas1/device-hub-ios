@@ -31,8 +31,7 @@
             for acceptsInput in [true, false] {
                 let view = RemoteSessionQuickControls(
                     acceptsInput: acceptsInput,
-                    buttonTapped: { _ in },
-                    rotateButtonTapped: {}
+                    buttonTapped: { _ in }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(RemoteCanvasColor.value)

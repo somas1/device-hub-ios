@@ -4,7 +4,6 @@ import SwiftUI
 struct RemoteSessionQuickControls: View, Equatable {
     let acceptsInput: Bool
     let buttonTapped: (DeviceButton) -> Void
-    let rotateButtonTapped: () -> Void
 
     /// Ignore action closures recreated by the parent on each video frame.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -15,7 +14,6 @@ struct RemoteSessionQuickControls: View, Equatable {
         HStack(spacing: 8) {
             button("Home", symbol: "house") { buttonTapped(.home) }
             button("Lock", symbol: "lock") { buttonTapped(.lock) }
-            button("Rotate", symbol: "rotate.right", action: rotateButtonTapped)
             button("Volume Up", symbol: "speaker.plus") { buttonTapped(.volumeUp) }
             button("Volume Down", symbol: "speaker.minus") { buttonTapped(.volumeDown) }
             button("Mute", symbol: "speaker.slash") { buttonTapped(.mute) }
