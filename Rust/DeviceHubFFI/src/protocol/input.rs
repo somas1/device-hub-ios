@@ -587,11 +587,33 @@ pub(super) async fn handle_keyboard_intent_with_sink(
                 return Err(invalid_keyboard_transition());
             }
             let usages = keyboard_usages(&next)?;
+            // A bitmap report has no order, so a modifier must be held in its
+            // own report around the key or iPadOS reads the key unmodified.
+            let mut held_modifiers = keyboard_usages(&previous)?;
+            for bit in 0..8 {
+                if modifiers & (1 << bit) != 0 {
+                    held_modifiers.insert(
+                        KeyboardUsage::new(0xE0 + bit)
+                            .map_err(|error| classify_hid_error(error.into(), "keyboard_input"))?,
+                    );
+                }
+            }
+            // Conservative: cleanup may treat the key as held before it lands.
             cleanup.pressed_keys = next;
+            if modifiers != 0 {
+                sink.replace(held_modifiers.clone())
+                    .await
+                    .map_err(|error| classify_hid_error(error, "keyboard_input"))?;
+            }
             sink.replace(usages)
                 .await
                 .map_err(|error| classify_hid_error(error, "keyboard_input"))?;
             tokio::time::sleep(INPUT_TAP_HOLD).await;
+            if modifiers != 0 {
+                sink.replace(held_modifiers)
+                    .await
+                    .map_err(|error| classify_hid_error(error, "keyboard_input"))?;
+            }
             sink.replace(keyboard_usages(&previous)?)
                 .await
                 .map_err(|error| classify_hid_error(error, "keyboard_input"))?;

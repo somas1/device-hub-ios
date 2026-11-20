@@ -158,6 +158,11 @@ visible, typed failure rather than an implicit mounting flow.
   orientation, asked from the orientation service at each volume press (the
   video geometry does not change on a 180° turn). A release always goes
   to the physical button its press used, even if the iPad turned in between.
+- A bitmap report carries no order, so a tap with modifiers (Shift+' for a
+  double quote, for example) sends the modifiers alone, then with the key,
+  then alone again, then the previous state, as a physical keyboard does.
+  Otherwise iPadOS may read the key unmodified. A tap without modifiers stays
+  two reports.
 - A successful write is not treated as proof that an input landed; real-device
   validation must observe the target.
 - Media teardown always names this app's session UUID. The upstream

@@ -56,6 +56,40 @@ fn hardware_button_taps_use_the_device_required_hold_duration() {
 }
 
 #[tokio::test]
+async fn shifted_tap_presses_shift_before_the_key_and_unmodified_tap_stays_two_reports() {
+    let mut cleanup = InputCleanupState::default();
+    let mut keyboard = MockKeyboardStateSink::default();
+    handle_keyboard_intent_with_sink(
+        KeyboardIntent::Tap {
+            usage: 0x34, // apostrophe; with Shift it types a double quote
+            modifiers: 0b0000_0010,
+        },
+        &mut cleanup,
+        &mut keyboard,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        keyboard.attempts,
+        vec![vec![0xE1], vec![0x34, 0xE1], vec![0xE1], Vec::new()]
+    );
+    assert!(cleanup.pressed_keys.is_empty());
+
+    let mut plain = MockKeyboardStateSink::default();
+    handle_keyboard_intent_with_sink(
+        KeyboardIntent::Tap {
+            usage: 0x04,
+            modifiers: 0,
+        },
+        &mut cleanup,
+        &mut plain,
+    )
+    .await
+    .unwrap();
+    assert_eq!(plain.attempts, vec![vec![0x04], Vec::new()]);
+}
+
+#[tokio::test]
 async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup() {
     let mut keyboard_cleanup = InputCleanupState {
         pressed_keys: BTreeMap::from([(0x05, 0b0000_0010)]),
@@ -72,9 +106,17 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
     )
     .await
     .unwrap();
+    // The tap's modifier lands one report before its key and lifts one
+    // report after it, like a physical keyboard; a bitmap report carries
+    // no order, so iPadOS would otherwise read the key without it.
     assert_eq!(
         keyboard.attempts,
-        vec![vec![0x04, 0x05, 0xE0, 0xE1], vec![0x05, 0xE1]]
+        vec![
+            vec![0x05, 0xE0, 0xE1],
+            vec![0x04, 0x05, 0xE0, 0xE1],
+            vec![0x05, 0xE0, 0xE1],
+            vec![0x05, 0xE1],
+        ]
     );
     assert_eq!(
         keyboard_cleanup.pressed_keys,
@@ -99,7 +141,7 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
     assert_eq!(failure.code, "input_delivery_failed");
     assert_eq!(
         failed_keyboard.attempts,
-        vec![vec![0x04, 0xE0, 0xE7], Vec::new()]
+        vec![vec![0xE0, 0xE7], vec![0x04, 0xE0, 0xE7]]
     );
     assert_eq!(
         failed_keyboard_cleanup.pressed_keys,
