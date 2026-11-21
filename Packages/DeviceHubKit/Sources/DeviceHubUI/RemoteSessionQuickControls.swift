@@ -22,7 +22,6 @@ struct RemoteSessionQuickControls: View, Equatable {
         .foregroundStyle(.white.opacity(acceptsInput ? 0.85 : 0.4))
         .disabled(!acceptsInput)
         .background(.black.opacity(0.58), in: .capsule)
-        .deviceHubOverlayGlass(in: .capsule)
     }
 
     private func button(_ title: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
