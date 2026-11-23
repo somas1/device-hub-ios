@@ -75,6 +75,10 @@ actor RemoteSessionOperation {
     private var processingTask: Task<Void, Never>?
     private var summary: DeviceSummary
 
+    var panelFixedLandscape: Bool {
+        summary.productType.hasPrefix("iPad")
+    }
+
     static func make(
         nativeSession: NativeSession,
         generation: SessionGeneration,

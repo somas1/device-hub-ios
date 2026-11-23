@@ -155,9 +155,11 @@ handle was destroyed, not that the device released input.
 
 Native dimensions describe the target's portrait touch space, even when a
 portrait target encodes landscape-shaped frames. The decoder validates each
-frame and carries its display turn on `RemoteDisplayFrame`. The canvas uses
-that turn as an image orientation without rotating pixel buffers; layout and
-input mapping share the corrected native size and target orientation.
+frame and carries its display turn on `RemoteDisplayFrame`. When a landscape-right
+iPad frame already has the expected dimensions, the decoder selects a half turn.
+This rule comes from one tested 13-inch iPad model. The canvas uses the display
+turn as an image orientation without rotating pixel buffers. Layout and touch
+mapping use the corrected native size and target orientation.
 
 The target orientation comes from the Rust worker. It reads it at each new
 video configuration, which must succeed, and between configurations about once

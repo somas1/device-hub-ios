@@ -73,11 +73,12 @@ public enum ScreenOrientation: Codable, CaseIterable, Equatable, Sendable {
     }
 }
 
-/// Quarter turn that shows a decoded frame upright in its oriented layout.
+/// Turn that shows a decoded frame upright in its oriented layout.
 public enum DisplayTurn: Equatable, Sendable {
     case upright
     case clockwise
     case counterclockwise
+    case half
 }
 
 public extension ScreenOrientation {
@@ -85,11 +86,16 @@ public extension ScreenOrientation {
     /// when the dimensions cannot be displayed.
     ///
     /// Some portrait targets encode landscape frames with the screen drawn
-    /// sideways and its top edge on the frame's left.
-    func displayTurn(decoded: PixelSize, native: PixelSize) -> DisplayTurn? {
+    /// sideways and its top edge on the frame's left. With panel-fixed
+    /// landscape encoding, the landscape-right frame has its top edge at the bottom.
+    func displayTurn(
+        decoded: PixelSize,
+        native: PixelSize,
+        panelFixedLandscape: Bool
+    ) -> DisplayTurn? {
         let expected = orientedSize(for: native)
         if decoded == expected {
-            return .upright
+            return panelFixedLandscape && self == .landscapeRight ? .half : .upright
         }
         guard decoded == PixelSize(width: expected.height, height: expected.width),
               decoded.width > decoded.height

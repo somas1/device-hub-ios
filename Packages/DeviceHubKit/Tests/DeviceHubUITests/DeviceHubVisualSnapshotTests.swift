@@ -49,7 +49,9 @@
 
         @Test("Screen-first state and viewport matrix")
         func visualMatrix() throws {
-            for scenario in VisualScenario.allCases where scenario != .livePortraitIPadTargetLandscapeCodedIPadDark {
+            for scenario in VisualScenario.allCases
+                where scenario != .livePortraitIPadTargetLandscapeCodedIPadDark && scenario != .landscapeRightPanelFixedIPad
+            {
                 let fixture = try VisualFixture(scenario: scenario)
                 let traits = fixture.traits
 
@@ -82,29 +84,20 @@
                 named: VisualScenario.livePortraitIPadTargetLandscapeCodedIPadDark.rawValue
             )
         }
-    }
 
-    enum VisualScenario: String, CaseIterable {
-        case emptyIPhoneLight
-        case pairingIPhoneDark
-        case connectingIPhoneLight
-        case liveIPhoneDark
-        case liveIPadLight
-        case liveIPadDark
-        case liveLandscapeIPadTargetIPhoneDark
-        case livePortraitIPadTargetLandscapeCodedIPadDark
-        case offlineIPhoneDark
-        case lockedIPhoneAccessibility
-        case developerModeIPadAccessibility
-        case localNetworkDeniedIPadDark
-        case deviceBusyIPhoneDark
-        case developerImageUnavailableIPadLight
-        case developerImageIncompatibleIPhoneDark
-        case xcodePreparationIPadLight
-        case deviceDetailsPendingVersionIPadLight
-        case aboutNoticesIPadLight
-        case noticesUnavailableIPhoneDark
-        case viewingOnlyIPadLight
+        @Test("Panel-fixed landscape-right iPad appears upright")
+        func landscapeRightPanelFixedIPad() throws {
+            let fixture = try VisualFixture(scenario: .landscapeRightPanelFixedIPad)
+            assertSnapshot(
+                of: fixture.view,
+                as: .image(
+                    precision: 0.99, perceptualPrecision: 0.98,
+                    layout: .fixed(width: fixture.size.width, height: fixture.size.height),
+                    traits: fixture.traits
+                ),
+                named: "upright"
+            )
+        }
     }
 
     @MainActor
@@ -265,6 +258,14 @@
                     device: devices.landscapeIPad,
                     presentation: .live,
                     remoteScreen: .tabletPortraitLandscapeCoded
+                )
+
+            case .landscapeRightPanelFixedIPad:
+                return try sessionState(
+                    roster: roster,
+                    device: devices.landscapeIPad,
+                    presentation: .live,
+                    remoteScreen: .tabletLandscapePanelFixed
                 )
 
             case .offlineIPhoneDark:
@@ -457,7 +458,11 @@
                 metadata: screenMetadata,
                 image: geometry.displayTurn == .clockwise
                     ? sidewaysScreenImage(width: geometry.imageWidth, height: geometry.imageHeight)
-                    : abstractScreenImage(width: geometry.imageWidth, height: geometry.imageHeight),
+                    : abstractScreenImage(
+                        width: geometry.imageWidth,
+                        height: geometry.imageHeight,
+                        upsideDown: geometry.displayTurn == .half
+                    ),
                 displayTurn: geometry.displayTurn
             )
             session.evaluatedAt = switch presentation {
@@ -498,7 +503,8 @@
 
         private static func abstractScreenImage(
             width: Int,
-            height: Int
+            height: Int,
+            upsideDown: Bool = false
         ) throws -> CGImage {
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             guard let context = CGContext(
@@ -511,6 +517,11 @@
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ) else {
                 throw VisualFixtureError.imageContextCreationFailed
+            }
+
+            if upsideDown {
+                context.translateBy(x: CGFloat(width), y: CGFloat(height))
+                context.scaleBy(x: -1, y: -1)
             }
 
             context.setFillColor(

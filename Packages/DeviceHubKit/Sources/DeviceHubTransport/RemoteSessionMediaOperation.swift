@@ -6,7 +6,10 @@ import Foundation
 
 extension RemoteSessionOperation {
     func startDecoder() {
-        let decoder = HEVCVideoDecoder(generation: generation)
+        let decoder = HEVCVideoDecoder(
+            generation: generation,
+            panelFixedLandscape: panelFixedLandscape
+        )
         self.decoder = decoder
         frameTask = Task {
             await consumeFrames(decoder.frames)
