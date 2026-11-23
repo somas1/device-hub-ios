@@ -1,6 +1,7 @@
 import DeviceHubClient
 import DeviceHubCore
 import DeviceHubDiagnostics
+import DeviceHubMedia
 import DeviceHubPersistence
 import Foundation
 import OSLog
@@ -118,6 +119,9 @@ extension DeviceHubClient {
                     diagnosticsPipeline.submit(
                         .failure(error, stage: stage)
                     )
+                },
+                observeDecoderFailure: { error, stage in
+                    diagnosticsPipeline.submit(.failure(error.deviceHubError, stage: stage), decoderError: error)
                 },
                 observeInputCleanup: { failure in
                     diagnosticsPipeline.submit(.failure(
@@ -237,6 +241,7 @@ struct DeviceHubTransportEnvironment: Sendable {
     let persistence: PairingPersistenceClient
     let bonjour: RemotePairingBonjourClient
     let observe: Observation
+    let observeDecoderFailure: @Sendable (MediaDecoderError, DiagnosticStage) async -> Void
     let observeInputCleanup: @Sendable (NativeSessionFailure) async -> Void
     let observePairingMilestone: PairingMilestoneObservation
     let now: @Sendable () -> Date
@@ -246,6 +251,7 @@ struct DeviceHubTransportEnvironment: Sendable {
         persistence: PairingPersistenceClient,
         bonjour: RemotePairingBonjourClient,
         observe: @escaping DiagnosticSink,
+        observeDecoderFailure: (@Sendable (MediaDecoderError, DiagnosticStage) async -> Void)? = nil,
         observeInputCleanup: (@Sendable (NativeSessionFailure) async -> Void)? = nil,
         observePairingMilestone:
         @escaping PairingMilestoneSink = { _ in },
@@ -267,6 +273,9 @@ struct DeviceHubTransportEnvironment: Sendable {
             }
         }
         let observation = self.observe
+        self.observeDecoderFailure = observeDecoderFailure ?? { error, stage in
+            await observation(error.deviceHubError, stage)
+        }
         self.observeInputCleanup = observeInputCleanup ?? { failure in
             await observation(mapNativeFailure(failure), .disconnecting)
         }

@@ -168,6 +168,30 @@ struct DeviceHubNativeMediaEventDecoderTests {
         #expect(controlEvents.isEmpty)
     }
 
+    @Test("a media callback after bridge cancellation does not fail control")
+    func cancelledVideoDoesNotFailControl() async throws {
+        let bridge = try NativeVideoEventBridge(generation: generation)
+        let control = AsyncThrowingStream<NativeSessionEvent, Error>.makeStream()
+        let context = DeviceHubNativeCallbackContext(
+            generation: generation,
+            controlContinuation: control.continuation,
+            relay: DeviceHubNativeSessionRelay(),
+            videoBridge: bridge
+        )
+        bridge.cancel()
+
+        withMediaEvent(
+            kind: DH_EVENT_VIDEO_DISCONTINUITY,
+            value: UInt64(DH_VIDEO_DISCONTINUITY_SEQUENCE_GAP)
+        ) {
+            context.handleMedia($0)
+        }
+        context.finishAfterTeardown()
+
+        var iterator = control.stream.makeAsyncIterator()
+        #expect(try await iterator.next() == nil)
+    }
+
     @Test("every borrowed byte span is copied before callback return")
     func borrowedBytesAreCopied() throws {
         var decoder = DeviceHubNativeMediaEventDecoder(

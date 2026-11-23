@@ -246,18 +246,6 @@ extension DeviceHubNativeCallbackContext {
             tracedAccessUnitCount += 1
             return tracedAccessUnitCount
         }
-        if traceOrdinal <= 10 || traceOrdinal.isMultiple(of: 60) {
-            DeviceHubNativeTrace.emit(
-                "video_access_unit ordinal=\(traceOrdinal) "
-                    + "sequence=\(accessUnit.sequenceNumber) "
-                    + "revision=\(accessUnit.parameterSetRevision) "
-                    + "sync=\(accessUnit.isSync) "
-                    + "orientation=\(accessUnit.geometry.orientation) "
-                    + "pixels=\(accessUnit.geometry.pixelSize.width)x"
-                    + "\(accessUnit.geometry.pixelSize.height) "
-                    + "bytes=\(accessUnit.bytes.count)"
-            )
-        }
         guard let videoBridge else {
             return
         }
@@ -270,8 +258,8 @@ extension DeviceHubNativeCallbackContext {
             fail(videoStreamFailure)
             return
         }
-        let result = accessUnit.bytes.withUnsafeBytes { bytes in
-            videoBridge.receiveAccessUnit(
+        let (result, queueDepth) = accessUnit.bytes.withUnsafeBytes { bytes in
+            videoBridge.receiveAccessUnitWithQueueDepth(
                 sequenceNumber: accessUnit.sequenceNumber,
                 receivedAt: now(),
                 orientation: accessUnit.geometry.orientation,
@@ -279,14 +267,27 @@ extension DeviceHubNativeCallbackContext {
                 bytes: bytes
             )
         }
+        if traceOrdinal <= 10 || traceOrdinal.isMultiple(of: 60) {
+            DeviceHubNativeTrace.emit(
+                "video_access_unit ordinal=\(traceOrdinal) "
+                    + "sequence=\(accessUnit.sequenceNumber) "
+                    + "revision=\(accessUnit.parameterSetRevision) "
+                    + "sync=\(accessUnit.isSync) "
+                    + "orientation=\(accessUnit.geometry.orientation) "
+                    + "pixels=\(accessUnit.geometry.pixelSize.width)x"
+                    + "\(accessUnit.geometry.pixelSize.height) "
+                    + "bytes=\(accessUnit.bytes.count)"
+                    + (videoBridge.tracedConsumerLag.map { " consumer_lag=\($0)" } ?? "")
+            )
+        }
         switch result {
         case .accepted:
             break
 
-        case .terminal:
+        case let .terminal(termination):
             DeviceHubNativeTrace.emit(
                 "video_access_unit_rejected "
-                    + "result=\(String(describing: result))"
+                    + "reason=\(termination.traceReason) queue_depth=\(queueDepth)"
             )
             fail(videoStreamFailure)
         }
@@ -454,7 +455,11 @@ extension DeviceHubNativeCallbackContext {
 
     private func fail(_ failure: NativeSessionFailure) {
         let shouldFinish = lock.withLock {
-            guard !isClosing, !isTerminal else {
+            // Media callbacks can arrive between consumer exit and native teardown.
+            guard
+                !isClosing, !isTerminal,
+                failure != videoStreamFailure || videoBridge?.isCancelled != true
+            else {
                 return false
             }
             isTerminal = true

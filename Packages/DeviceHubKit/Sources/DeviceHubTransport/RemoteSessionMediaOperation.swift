@@ -5,10 +5,11 @@ import DeviceHubMedia
 import Foundation
 
 extension RemoteSessionOperation {
-    func startDecoder() {
+    func startDecoder(for events: NativeVideoEventStream) {
         let decoder = HEVCVideoDecoder(
             generation: generation,
-            panelFixedLandscape: panelFixedLandscape
+            panelFixedLandscape: panelFixedLandscape,
+            consumerLag: events.consumerLag
         )
         self.decoder = decoder
         frameTask = Task {
@@ -18,6 +19,7 @@ extension RemoteSessionOperation {
 
     func consumeVideo(_ events: NativeVideoEventStream) async {
         do {
+            defer { events.cancel() }
             for await event in events {
                 try Task.checkCancellation()
                 switch event {
@@ -39,7 +41,7 @@ extension RemoteSessionOperation {
                     )
 
                 case .discontinuity:
-                    try await resetDecoder()
+                    try await resetDecoder(for: events)
 
                 case let .failed(failure):
                     if case let .native(cause) = failure.reason {
@@ -62,7 +64,8 @@ extension RemoteSessionOperation {
         } catch let error as MediaDecoderError {
             await terminateForMediaFailure(
                 error.deviceHubError,
-                stage: mediaDiagnosticStage(for: error)
+                stage: mediaDiagnosticStage(for: error),
+                decoderError: error
             )
         } catch let error as DeviceHubError {
             await terminateForMediaFailure(error)
@@ -88,32 +91,38 @@ extension RemoteSessionOperation {
         } catch let error as MediaDecoderError {
             await terminateForMediaFailure(
                 error.deviceHubError,
-                stage: mediaDiagnosticStage(for: error)
+                stage: mediaDiagnosticStage(for: error),
+                decoderError: error
             )
         } catch {
             await terminateForMediaFailure(.decoderFailed)
         }
     }
 
-    func resetDecoder() async throws {
+    func resetDecoder(for events: NativeVideoEventStream) async throws {
         decoderConfiguration = nil
         frameTask?.cancel()
         frameTask = nil
         if let decoder {
             try await decoder.stop()
         }
-        startDecoder()
+        startDecoder(for: events)
     }
 
     func terminateForMediaFailure(
         _ error: DeviceHubError,
-        stage: DiagnosticStage = .decoding
+        stage: DiagnosticStage = .decoding,
+        decoderError: MediaDecoderError? = nil
     ) async {
         guard cleanupTask == nil else {
             return
         }
         finishEvents(with: error)
-        await record(error, stage: stage)
+        if let decoderError {
+            await observeDecoderFailure(decoderError, stage)
+        } else {
+            await record(error, stage: stage)
+        }
         await cleanup()
     }
 }

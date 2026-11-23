@@ -1,5 +1,6 @@
 import DeviceHubCore
 import DeviceHubDiagnostics
+import DeviceHubMedia
 import Foundation
 import OSLog
 
@@ -98,8 +99,8 @@ final class DeviceHubTransportDiagnosticsPipeline: @unchecked Sendable {
         worker.cancel()
     }
 
-    func submit(_ submission: TransportDiagnosticSubmission) {
-        DeviceHubTransportTrace.emit(submission)
+    func submit(_ submission: TransportDiagnosticSubmission, decoderError: MediaDecoderError? = nil) {
+        DeviceHubTransportTrace.emit(submission, decoderError: decoderError)
         if case let .dropped(dropped) = continuation.yield(submission) {
             reportFailure(dropped.stage)
         }
@@ -109,7 +110,7 @@ final class DeviceHubTransportDiagnosticsPipeline: @unchecked Sendable {
 /// Mirrors only the already-redacted diagnostic vocabulary to an attached
 /// device console when explicitly enabled for live protocol debugging.
 private enum DeviceHubTransportTrace {
-    static func emit(_ submission: TransportDiagnosticSubmission) {
+    static func emit(_ submission: TransportDiagnosticSubmission, decoderError: MediaDecoderError?) {
         guard
             ProcessInfo.processInfo.environment[
                 "DEVICE_HUB_BOOTSTRAP_TRACE"
@@ -126,10 +127,26 @@ private enum DeviceHubTransportTrace {
                         + submission.stage.rawValue
                         + " failure="
                         + failureCode
+                        + (decoderError.map { " decoder_error=\($0.traceCase)" } ?? "")
                         + "\n"
                 ).utf8
             )
         )
+    }
+}
+
+private extension MediaDecoderError {
+    var traceCase: String {
+        switch self {
+        case .decoderStopped: "decoderStopped"
+        case .decodedDimensionsMismatch: "decodedDimensionsMismatch"
+        case .outputFrameDropped: "outputFrameDropped"
+        case .outputFrameMissing: "outputFrameMissing"
+        case .invalidParameterSet: "invalidParameterSet"
+        case .invalidSample: "invalidSample"
+        case .staleGeneration: "staleGeneration"
+        case .systemFailure: "systemFailure"
+        }
     }
 }
 

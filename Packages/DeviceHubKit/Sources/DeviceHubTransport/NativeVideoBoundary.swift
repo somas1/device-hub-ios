@@ -32,6 +32,14 @@ public struct NativeVideoEventStream: AsyncSequence, Sendable {
         await storage.waitUntilConsumerReady()
     }
 
+    func cancel() {
+        storage.cancel()
+    }
+
+    var consumerLag: VideoConsumerLag? {
+        storage.consumerLag
+    }
+
     public struct AsyncIterator: AsyncIteratorProtocol {
         private var storage: NativeVideoEventStorage?
 
@@ -71,6 +79,16 @@ public final class NativeVideoEventBridge: Sendable {
     public static let maximumBufferCapacity = 256
 
     public let events: NativeVideoEventStream
+
+    /// Whether cancellation closed the stream before any other termination.
+    public var isCancelled: Bool {
+        storage.terminalResult()?.result == .terminal(.cancelled)
+    }
+
+    /// Admitted access units minus decoder submissions, when tracing is enabled.
+    public var tracedConsumerLag: Int? {
+        storage.consumerLag?.count
+    }
 
     private let generation: SessionGeneration
     private let storage: NativeVideoEventStorage
@@ -120,14 +138,14 @@ public final class NativeVideoEventBridge: Sendable {
         pictureParameterSet: UnsafeRawBufferPointer
     ) -> NativeVideoIngressResult {
         if let terminal = storage.terminalResult() {
-            return terminal
+            return terminal.result
         }
         guard
             Self.isValidParameterSetBuffer(videoParameterSet),
             Self.isValidParameterSetBuffer(sequenceParameterSet),
             Self.isValidParameterSetBuffer(pictureParameterSet)
         else {
-            return storage.fail(.invalidConfiguration)
+            return storage.fail(.invalidConfiguration).result
         }
 
         let configuration: HEVCConfiguration
@@ -138,7 +156,7 @@ public final class NativeVideoEventBridge: Sendable {
                 pictureParameterSet: Self.copy(pictureParameterSet)
             )
         } catch {
-            return storage.fail(.invalidConfiguration)
+            return storage.fail(.invalidConfiguration).result
         }
 
         return storage.receive(
@@ -151,7 +169,7 @@ public final class NativeVideoEventBridge: Sendable {
             ),
             sequenceNumber: sequenceNumber,
             kind: .configuration
-        )
+        ).result
     }
 
     /// Copies and accepts one complete, four-byte-length-prefixed access unit.
@@ -163,6 +181,23 @@ public final class NativeVideoEventBridge: Sendable {
         pixelSize: PixelSize,
         bytes: UnsafeRawBufferPointer
     ) -> NativeVideoIngressResult {
+        receiveAccessUnitWithQueueDepth(
+            sequenceNumber: sequenceNumber,
+            receivedAt: receivedAt,
+            orientation: orientation,
+            pixelSize: pixelSize,
+            bytes: bytes
+        ).result
+    }
+
+    /// Reports the queue depth before a rejection can discard queued events.
+    public func receiveAccessUnitWithQueueDepth(
+        sequenceNumber: UInt64,
+        receivedAt: Date,
+        orientation: ScreenOrientation,
+        pixelSize: PixelSize,
+        bytes: UnsafeRawBufferPointer
+    ) -> (result: NativeVideoIngressResult, queueDepth: Int) {
         if let terminal = storage.terminalResult() {
             return terminal
         }
@@ -214,7 +249,7 @@ public final class NativeVideoEventBridge: Sendable {
             ),
             sequenceNumber: sequenceNumber,
             kind: .discontinuity
-        )
+        ).result
     }
 
     /// Ends the stream with one sanitized native failure event.
@@ -222,7 +257,7 @@ public final class NativeVideoEventBridge: Sendable {
     public func receiveFailure(
         _ failure: NativeSessionFailure
     ) -> NativeVideoIngressResult {
-        storage.fail(.native(failure))
+        storage.fail(.native(failure)).result
     }
 
     /// Ends the stream normally after all already accepted events.
@@ -274,6 +309,8 @@ private enum NativeVideoIncomingKind: Equatable {
 }
 
 private final class NativeVideoEventStorage: @unchecked Sendable {
+    typealias IngressSnapshot = (result: NativeVideoIngressResult, queueDepth: Int)
+
     private struct State {
         var buffer: NativeVideoEventRingBuffer
         var consumerClaimed = false
@@ -298,6 +335,7 @@ private final class NativeVideoEventStorage: @unchecked Sendable {
     }
 
     private let bufferCapacity: Int
+    let consumerLag = DeviceHubMediaTrace.isEnabled ? VideoConsumerLag() : nil
     private let consumerReadiness: AsyncStream<Void>
     private let consumerReadinessContinuation:
         AsyncStream<Void>.Continuation
@@ -339,10 +377,10 @@ private final class NativeVideoEventStorage: @unchecked Sendable {
         return false
     }
 
-    func terminalResult() -> NativeVideoIngressResult? {
-        lock.lock()
-        defer { lock.unlock() }
-        return state.termination.map(NativeVideoIngressResult.terminal)
+    func terminalResult() -> IngressSnapshot? {
+        lock.withLock {
+            state.termination.map { (.terminal($0), state.buffer.count) }
+        }
     }
 
     func waitUntilConsumerReady() async {
@@ -354,74 +392,65 @@ private final class NativeVideoEventStorage: @unchecked Sendable {
         _ event: NativeVideoEvent,
         sequenceNumber: UInt64,
         kind: NativeVideoIncomingKind
-    ) -> NativeVideoIngressResult {
+    ) -> IngressSnapshot {
         lock.lock()
+        let queueDepth = state.buffer.count
         if let termination = state.termination {
             lock.unlock()
-            return .terminal(termination)
+            return (.terminal(termination), queueDepth)
         }
         guard
             state.lastSequenceNumber.map({ sequenceNumber > $0 }) ?? true
         else {
-            let delivery = transitionToFailureLocked(
-                .invalidSequence,
-                discardBuffered: false
-            )
-            lock.unlock()
-            resume(delivery)
-            return .terminal(.failed(.invalidSequence))
+            return rejectLocked(.invalidSequence)
         }
         guard kind != .accessUnit || state.hasConfiguration else {
-            let delivery = transitionToFailureLocked(
-                .missingConfiguration,
-                discardBuffered: false
-            )
-            lock.unlock()
-            resume(delivery)
-            return .terminal(.failed(.missingConfiguration))
+            return rejectLocked(.missingConfiguration)
         }
-        guard state.waiter != nil || state.buffer.count < bufferCapacity else {
-            let delivery = transitionToFailureLocked(
-                .bufferSaturated,
-                discardBuffered: true
-            )
-            lock.unlock()
-            resume(delivery)
-            return .terminal(.failed(.bufferSaturated))
+        guard state.waiter != nil || queueDepth < bufferCapacity else {
+            return rejectLocked(.bufferSaturated, discardBuffered: true)
         }
 
         state.lastSequenceNumber = sequenceNumber
         switch kind {
         case .accessUnit:
-            break
+            consumerLag?.admit()
         case .configuration:
             state.hasConfiguration = true
         case .discontinuity:
             state.hasConfiguration = false
         }
         let delivery = enqueueLocked(event)
+        let acceptedDepth = state.buffer.count
         lock.unlock()
-        if let termination = resume(delivery) {
-            return .terminal(termination)
-        }
-        return .accepted
+        return resume(delivery) ?? (.accepted, acceptedDepth)
     }
 
     func fail(
         _ reason: NativeVideoFailureReason
-    ) -> NativeVideoIngressResult {
+    ) -> IngressSnapshot {
         lock.lock()
         if let termination = state.termination {
+            let queueDepth = state.buffer.count
             lock.unlock()
-            return .terminal(termination)
+            return (.terminal(termination), queueDepth)
         }
+        return rejectLocked(reason)
+    }
+
+    /// Captures the depth under the producer lock and releases it before delivery.
+    private func rejectLocked(
+        _ reason: NativeVideoFailureReason,
+        discardBuffered: Bool = false
+    ) -> IngressSnapshot {
+        let queueDepth = state.buffer.count
         let delivery = transitionToFailureLocked(
             reason,
-            discardBuffered: false
+            discardBuffered: discardBuffered
         )
         lock.unlock()
         resume(delivery)
-        return .terminal(.failed(reason))
+        return (.terminal(.failed(reason)), queueDepth)
     }
 
     func finish() -> NativeVideoIngressResult {
@@ -550,11 +579,11 @@ private final class NativeVideoEventStorage: @unchecked Sendable {
     @discardableResult
     private func resume(
         _ delivery: Delivery?
-    ) -> NativeVideoStreamTermination? {
+    ) -> IngressSnapshot? {
         guard let delivery else {
             return lock.withLock {
                 if case .cancelled? = state.termination {
-                    return .cancelled
+                    return (.terminal(.cancelled), state.buffer.count)
                 }
                 return nil
             }
@@ -563,9 +592,11 @@ private final class NativeVideoEventStorage: @unchecked Sendable {
 
         lock.lock()
         guard state.pendingDelivery?.id == delivery.id else {
-            let termination = state.termination
+            let snapshot = state.termination.map {
+                (NativeVideoIngressResult.terminal($0), state.buffer.count)
+            }
             lock.unlock()
-            return termination
+            return snapshot
         }
         state.pendingDelivery = nil
         delivery.continuation.resume(returning: delivery.event)

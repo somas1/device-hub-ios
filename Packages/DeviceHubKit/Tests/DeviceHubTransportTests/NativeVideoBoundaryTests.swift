@@ -518,7 +518,7 @@ extension NativeVideoBoundaryTests {
     }
 }
 
-private func lengthPrefixedNALUnit(_ bytes: [UInt8]) -> [UInt8] {
+func lengthPrefixedNALUnit(_ bytes: [UInt8]) -> [UInt8] {
     let count = UInt32(bytes.count)
     return [
         UInt8((count >> 24) & 0xFF),
@@ -548,7 +548,7 @@ private func withUnsafeBuffers<Result>(
     }
 }
 
-private func receiveValidConfiguration(
+func receiveValidConfiguration(
     on bridge: NativeVideoEventBridge,
     sequenceNumber: UInt64
 ) -> NativeVideoIngressResult {
@@ -565,7 +565,7 @@ private func receiveValidConfiguration(
     }
 }
 
-private func receiveValidAccessUnit(
+func receiveValidAccessUnit(
     on bridge: NativeVideoEventBridge,
     sequenceNumber: UInt64
 ) -> NativeVideoIngressResult {
@@ -581,7 +581,7 @@ private func receiveValidAccessUnit(
     }
 }
 
-private func testGeneration(_ byte: UInt8) -> SessionGeneration {
+func testGeneration(_ byte: UInt8) -> SessionGeneration {
     SessionGeneration(
         rawValue: UUID(
             uuid: (

@@ -23,24 +23,27 @@ public enum NativeVideoFailureReason:
     case multipleConsumers
     case native(NativeSessionFailure)
 
-    public var description: String {
-        let kind = switch self {
+    fileprivate var traceReason: String {
+        switch self {
         case .bufferSaturated:
-            "buffer-saturated"
+            "bufferSaturated"
         case .invalidAccessUnit:
-            "invalid-access-unit"
+            "invalidAccessUnit"
         case .invalidConfiguration:
-            "invalid-configuration"
+            "invalidConfiguration"
         case .invalidSequence:
-            "invalid-sequence"
+            "invalidSequence"
         case .missingConfiguration:
-            "missing-configuration"
+            "missingConfiguration"
         case .multipleConsumers:
-            "multiple-consumers"
+            "multipleConsumers"
         case .native:
             "native"
         }
-        return "<redacted-native-video-failure \(kind)>"
+    }
+
+    public var description: String {
+        "<redacted-native-video-failure \(traceReason)>"
     }
 
     public var debugDescription: String {
@@ -104,16 +107,20 @@ public enum NativeVideoStreamTermination:
     case failed(NativeVideoFailureReason)
     case finished
 
-    public var description: String {
-        let kind = switch self {
+    /// The case name for a print-only trace. Associated values stay redacted.
+    public var traceReason: String {
+        switch self {
         case .cancelled:
             "cancelled"
-        case .failed:
-            "failed"
+        case let .failed(reason):
+            reason.traceReason
         case .finished:
             "finished"
         }
-        return "<redacted-native-video-termination \(kind)>"
+    }
+
+    public var description: String {
+        "<redacted-native-video-termination \(traceReason)>"
     }
 
     public var debugDescription: String {
