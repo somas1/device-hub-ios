@@ -67,6 +67,8 @@ acknowledge failed cleanup while viewing stays stopped.
 
 Freeing a Rust session cancels and joins its structured tasks. Its callback
 context cannot be invoked after the corresponding free operation returns.
+The Swift video consumer cancels its ingress bridge as soon as it exits,
+refusing late access units while the rest of session teardown runs.
 
 ### Input cleanup outcome
 

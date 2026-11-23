@@ -19,6 +19,7 @@ extension RemoteSessionOperation {
 
     func consumeVideo(_ events: NativeVideoEventStream) async {
         do {
+            defer { events.cancel() }
             for await event in events {
                 try Task.checkCancellation()
                 switch event {

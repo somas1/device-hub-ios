@@ -455,7 +455,11 @@ extension DeviceHubNativeCallbackContext {
 
     private func fail(_ failure: NativeSessionFailure) {
         let shouldFinish = lock.withLock {
-            guard !isClosing, !isTerminal else {
+            // Media callbacks can arrive between consumer exit and native teardown.
+            guard
+                !isClosing, !isTerminal,
+                failure != videoStreamFailure || videoBridge?.isCancelled != true
+            else {
                 return false
             }
             isTerminal = true

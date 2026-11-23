@@ -32,6 +32,10 @@ public struct NativeVideoEventStream: AsyncSequence, Sendable {
         await storage.waitUntilConsumerReady()
     }
 
+    func cancel() {
+        storage.cancel()
+    }
+
     var consumerLag: VideoConsumerLag? {
         storage.consumerLag
     }
@@ -75,6 +79,11 @@ public final class NativeVideoEventBridge: Sendable {
     public static let maximumBufferCapacity = 256
 
     public let events: NativeVideoEventStream
+
+    /// Whether cancellation closed the stream before any other termination.
+    public var isCancelled: Bool {
+        storage.terminalResult()?.result == .terminal(.cancelled)
+    }
 
     /// Admitted access units minus decoder submissions, when tracing is enabled.
     public var tracedConsumerLag: Int? {
