@@ -183,11 +183,12 @@ visible, typed failure rather than an implicit mounting flow.
 - Touch and the stateful virtual keyboard use UniversalHID. Hardware buttons
   use Indigo. Keyboard chords update one UniversalHID usage bitmap, and
   cancellation clears the complete bitmap before teardown.
-- iPadOS swaps the physical volume buttons while the iPad is upside down, so
-  Volume Up and Volume Down are sent as the other physical button in that
-  orientation, asked from the orientation service at each volume press (the
-  video geometry's orientation can lag a turn by up to about a second). A release always goes
-  to the physical button its press used, even if the iPad turned in between.
+- Volume Up and Volume Down use the opposite physical button in upside-down
+  portrait on all targets and in landscape left on iPads. The landscape-left
+  rule comes from one tested 13-inch iPad model. Volume presses query the
+  orientation service because video geometry can lag a turn by up to about a
+  second. A release goes to the physical button its press used, even if the
+  target turned in between.
 - A bitmap report carries no order, so a tap with modifiers (Shift+' for a
   double quote, for example) sends the modifiers alone, then with the key,
   then alone again, then the previous state, as a physical keyboard does.

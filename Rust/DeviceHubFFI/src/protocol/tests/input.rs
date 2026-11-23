@@ -157,6 +157,7 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
     handle_hardware_button_with_sink(
         intent,
         DhOrientation::Portrait,
+        false,
         &mut button_cleanup,
         &mut button,
     )
@@ -179,6 +180,7 @@ async fn semantic_taps_emit_ordered_edges_and_retain_failed_releases_for_cleanup
     let failure = handle_hardware_button_with_sink(
         intent,
         DhOrientation::Portrait,
+        false,
         &mut failed_button_cleanup,
         &mut failed_button,
     )
@@ -474,6 +476,7 @@ async fn assert_inflight_command_cancellation(command: ControlCommand, hardware:
         1,
         indigo,
         orientation,
+        false,
         controls,
         cancellation,
         video,
@@ -697,61 +700,40 @@ fn button_intent(
 }
 
 #[tokio::test]
-async fn volume_taps_swap_physical_buttons_only_when_upside_down() {
+async fn volume_taps_swap_landscape_left_only_on_ipad() {
+    use DhOrientation::{LandscapeLeft, LandscapeRight, Portrait, PortraitUpsideDown};
     use HardwareButton::{Home, VolumeDown, VolumeUp};
-    for (button, orientation, sent) in [
-        (
-            DhHardwareButton::VolumeUp,
-            DhOrientation::Portrait,
-            VolumeUp,
-        ),
-        (
-            DhHardwareButton::VolumeUp,
-            DhOrientation::LandscapeLeft,
-            VolumeUp,
-        ),
-        (
-            DhHardwareButton::VolumeUp,
-            DhOrientation::LandscapeRight,
-            VolumeUp,
-        ),
-        (
-            DhHardwareButton::VolumeUp,
-            DhOrientation::PortraitUpsideDown,
-            VolumeDown,
-        ),
-        (
-            DhHardwareButton::VolumeDown,
-            DhOrientation::Portrait,
-            VolumeDown,
-        ),
-        (
-            DhHardwareButton::VolumeDown,
-            DhOrientation::PortraitUpsideDown,
-            VolumeUp,
-        ),
-        (
-            DhHardwareButton::Home,
-            DhOrientation::PortraitUpsideDown,
-            Home,
-        ),
-    ] {
-        let mut cleanup = InputCleanupState::default();
-        let mut sink = MockHardwareButtonSink::default();
-        handle_hardware_button_with_sink(
-            button_intent(button, DhButtonPhase::Tap),
-            orientation,
-            &mut cleanup,
-            &mut sink,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            sink.attempts,
-            vec![(sent, ButtonState::Down), (sent, ButtonState::Up)],
-            "{button:?} while {orientation:?}"
-        );
-        assert!(cleanup.pressed_buttons.is_empty());
+    let landscape_left = [(false, VolumeUp, VolumeDown), (true, VolumeDown, VolumeUp)];
+    for (is_ipad, left_up, left_down) in landscape_left {
+        for (button, orientation, sent) in [
+            (DhHardwareButton::VolumeUp, Portrait, VolumeUp),
+            (DhHardwareButton::VolumeDown, Portrait, VolumeDown),
+            (DhHardwareButton::VolumeUp, PortraitUpsideDown, VolumeDown),
+            (DhHardwareButton::VolumeDown, PortraitUpsideDown, VolumeUp),
+            (DhHardwareButton::VolumeUp, LandscapeLeft, left_up),
+            (DhHardwareButton::VolumeDown, LandscapeLeft, left_down),
+            (DhHardwareButton::VolumeUp, LandscapeRight, VolumeUp),
+            (DhHardwareButton::VolumeDown, LandscapeRight, VolumeDown),
+            (DhHardwareButton::Home, PortraitUpsideDown, Home),
+        ] {
+            let mut cleanup = InputCleanupState::default();
+            let mut sink = MockHardwareButtonSink::default();
+            handle_hardware_button_with_sink(
+                button_intent(button, DhButtonPhase::Tap),
+                orientation,
+                is_ipad,
+                &mut cleanup,
+                &mut sink,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                sink.attempts,
+                vec![(sent, ButtonState::Down), (sent, ButtonState::Up)],
+                "{button:?} while {orientation:?} (iPad={is_ipad})"
+            );
+            assert!(cleanup.pressed_buttons.is_empty());
+        }
     }
 }
 
@@ -790,38 +772,45 @@ fn volume_orientation_comes_from_the_live_query_and_falls_back_unswapped() {
 
 #[tokio::test]
 async fn volume_release_after_turning_lets_go_of_the_button_that_was_pressed() {
-    for release in [DhButtonPhase::Up, DhButtonPhase::Cancel] {
-        let mut cleanup = InputCleanupState::default();
-        let mut sink = MockHardwareButtonSink::default();
-        handle_hardware_button_with_sink(
-            button_intent(DhHardwareButton::VolumeUp, DhButtonPhase::Down),
-            DhOrientation::PortraitUpsideDown,
-            &mut cleanup,
-            &mut sink,
-        )
-        .await
-        .unwrap();
-        handle_hardware_button_with_sink(
-            button_intent(DhHardwareButton::VolumeUp, release),
-            DhOrientation::Portrait,
-            &mut cleanup,
-            &mut sink,
-        )
-        .await
-        .unwrap();
-        let released = if release == DhButtonPhase::Up {
-            ButtonState::Up
-        } else {
-            ButtonState::Canceled
-        };
-        assert_eq!(
-            sink.attempts,
-            vec![
-                (HardwareButton::VolumeDown, ButtonState::Down),
-                (HardwareButton::VolumeDown, released),
-            ]
-        );
-        assert!(cleanup.pressed_buttons.is_empty());
+    for (is_ipad, initial_orientation) in [
+        (false, DhOrientation::PortraitUpsideDown),
+        (true, DhOrientation::PortraitUpsideDown),
+        (true, DhOrientation::LandscapeLeft),
+    ] {
+        for (release, released) in [
+            (DhButtonPhase::Up, ButtonState::Up),
+            (DhButtonPhase::Cancel, ButtonState::Canceled),
+        ] {
+            let mut cleanup = InputCleanupState::default();
+            let mut sink = MockHardwareButtonSink::default();
+            handle_hardware_button_with_sink(
+                button_intent(DhHardwareButton::VolumeUp, DhButtonPhase::Down),
+                initial_orientation,
+                is_ipad,
+                &mut cleanup,
+                &mut sink,
+            )
+            .await
+            .unwrap();
+            handle_hardware_button_with_sink(
+                button_intent(DhHardwareButton::VolumeUp, release),
+                DhOrientation::Portrait,
+                is_ipad,
+                &mut cleanup,
+                &mut sink,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                sink.attempts,
+                vec![
+                    (HardwareButton::VolumeDown, ButtonState::Down),
+                    (HardwareButton::VolumeDown, released),
+                ],
+                "{initial_orientation:?} to Portrait (iPad={is_ipad}) on {release:?}"
+            );
+            assert!(cleanup.pressed_buttons.is_empty());
+        }
     }
 }
 
@@ -977,6 +966,7 @@ async fn run_live_loop(
         1,
         indigo,
         orientation,
+        false,
         controls,
         cancellation,
         video,

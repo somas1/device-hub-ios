@@ -11,6 +11,7 @@ const ORIENTATION_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 pub(super) async fn run_control_stream(
     adapter: &mut tcp::handle::AdapterHandle,
     handshake: &mut RsdHandshake,
+    is_ipad: bool,
     emitter: &EventEmitter,
     media: &MediaEmitter,
     controls: ControlGate,
@@ -153,6 +154,7 @@ pub(super) async fn run_control_stream(
         keyboard_service_id,
         indigo_hid,
         orientation,
+        is_ipad,
         controls,
         cancellation,
         video,
@@ -171,6 +173,7 @@ pub(super) async fn run_active_control_loop(
     keyboard_service_id: u64,
     mut indigo_hid: IndigoHidClient<Box<dyn idevice::ReadWrite>>,
     mut orientation: OrientationServiceClient<Box<dyn idevice::ReadWrite>>,
+    is_ipad: bool,
     mut controls: ControlGate,
     mut cancellation: tokio::sync::watch::Receiver<bool>,
     mut video: LiveVideoState,
@@ -284,6 +287,7 @@ pub(super) async fn run_active_control_loop(
                         keyboard_service_id,
                         &mut indigo_hid,
                         &mut orientation,
+                        is_ipad,
                         &mut cleanup,
                         &mut video.geometry,
                         emitter,
@@ -696,6 +700,7 @@ impl HardwareButtonSink for IndigoHidClient<Box<dyn idevice::ReadWrite>> {
 pub(super) async fn handle_hardware_button_with_sink(
     intent: crate::model::HardwareButtonIntent,
     orientation: DhOrientation,
+    is_ipad: bool,
     cleanup: &mut InputCleanupState,
     sink: &mut impl HardwareButtonSink,
 ) -> Result<(), PublicFailure> {
@@ -707,7 +712,13 @@ pub(super) async fn handle_hardware_button_with_sink(
         DhHardwareButton::Mute => HardwareButton::Mute,
         DhHardwareButton::Siri => HardwareButton::Siri,
     };
-    let button = physical_button(button, intent.phase, orientation, &cleanup.pressed_buttons);
+    let button = physical_button(
+        button,
+        intent.phase,
+        orientation,
+        is_ipad,
+        &cleanup.pressed_buttons,
+    );
     match intent.phase {
         DhButtonPhase::Down => {
             if !cleanup.pressed_buttons.contains(&button) {
@@ -745,13 +756,13 @@ pub(super) async fn handle_hardware_button_with_sink(
     Ok(())
 }
 
-/// iPadOS swaps the physical volume buttons while the iPad is upside down, so
-/// the other one is sent to keep Volume Up raising the volume. A release goes
-/// to the physical button its press used, even if the iPad turned in between.
+/// Swap the physical volume buttons for upside-down targets and landscape-left
+/// iPads. A release goes to the physical button its press used across a turn.
 fn physical_button(
     button: HardwareButton,
     phase: DhButtonPhase,
     orientation: DhOrientation,
+    is_ipad: bool,
     pressed: &[HardwareButton],
 ) -> HardwareButton {
     let other = match button {
@@ -759,7 +770,9 @@ fn physical_button(
         HardwareButton::VolumeDown => HardwareButton::VolumeUp,
         _ => return button,
     };
-    let (oriented, unoriented) = if orientation == DhOrientation::PortraitUpsideDown {
+    let swap = orientation == DhOrientation::PortraitUpsideDown
+        || (is_ipad && orientation == DhOrientation::LandscapeLeft);
+    let (oriented, unoriented) = if swap {
         (other, button)
     } else {
         (button, other)
@@ -799,6 +812,7 @@ async fn handle_control_command(
     keyboard_service_id: u64,
     indigo_hid: &mut IndigoHidClient<Box<dyn idevice::ReadWrite>>,
     orientation: &mut OrientationServiceClient<Box<dyn idevice::ReadWrite>>,
+    is_ipad: bool,
     cleanup: &mut InputCleanupState,
     geometry: &mut DhDisplayGeometry,
     emitter: &EventEmitter,
@@ -876,6 +890,7 @@ async fn handle_control_command(
             handle_hardware_button_with_sink(
                 intent,
                 volume_orientation(state.as_ref()),
+                is_ipad,
                 cleanup,
                 indigo_hid,
             )

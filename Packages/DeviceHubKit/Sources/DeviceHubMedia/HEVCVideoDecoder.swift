@@ -39,14 +39,17 @@ public actor HEVCVideoDecoder {
     private var stopped = false
     private var tracedDecodeCount = 0
 
-    /// Creates a decoder permanently scoped to one connection generation.
-    public init(generation: SessionGeneration) {
+    /// Creates a decoder permanently scoped to one connection generation and target.
+    public init(generation: SessionGeneration, panelFixedLandscape: Bool = false) {
         let pair = AsyncThrowingStream.makeStream(
             of: RemoteDisplayFrame.self,
             throwing: Error.self,
             bufferingPolicy: .bufferingNewest(1)
         )
-        let gate = FrameDeliveryGate(continuation: pair.continuation)
+        let gate = FrameDeliveryGate(
+            continuation: pair.continuation,
+            panelFixedLandscape: panelFixedLandscape
+        )
         pair.continuation.onTermination = { [weak gate] termination in
             if case .cancelled = termination {
                 gate?.consumerCancelled()
@@ -424,15 +427,18 @@ final class FrameDeliveryGate: @unchecked Sendable {
     private let continuation:
         AsyncThrowingStream<RemoteDisplayFrame, Error>.Continuation
     private let lock = NSLock()
+    private let panelFixedLandscape: Bool
     private let synchronization: FrameDeliveryGateSynchronization
     private var state = State()
 
     init(
         continuation:
         AsyncThrowingStream<RemoteDisplayFrame, Error>.Continuation,
+        panelFixedLandscape: Bool = false,
         synchronization: FrameDeliveryGateSynchronization = .none
     ) {
         self.continuation = continuation
+        self.panelFixedLandscape = panelFixedLandscape
         self.synchronization = synchronization
     }
 
@@ -499,7 +505,8 @@ final class FrameDeliveryGate: @unchecked Sendable {
 
         guard let displayTurn = metadata.orientation.displayTurn(
             decoded: PixelSize(width: image.width, height: image.height),
-            native: metadata.pixelSize
+            native: metadata.pixelSize,
+            panelFixedLandscape: panelFixedLandscape
         ) else {
             fail(token: token, error: .decodedDimensionsMismatch)
             return

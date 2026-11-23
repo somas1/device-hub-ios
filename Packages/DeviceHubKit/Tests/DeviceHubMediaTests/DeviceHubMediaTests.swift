@@ -33,18 +33,19 @@ struct HEVCVideoDecoderTests {
     }
 
     @Test(arguments: [
-        (96, 64, ScreenOrientation.portrait, DisplayTurn.clockwise),
-        (64, 96, ScreenOrientation.portrait, DisplayTurn.upright),
-        (96, 64, ScreenOrientation.landscapeLeft, DisplayTurn.upright),
-        (96, 64, ScreenOrientation.landscapeRight, DisplayTurn.upright),
-        (64, 96, ScreenOrientation.portraitUpsideDown, DisplayTurn.upright),
-        (96, 64, ScreenOrientation.portraitUpsideDown, DisplayTurn.counterclockwise)
+        (96, 64, ScreenOrientation.portrait, false, DisplayTurn.clockwise),
+        (64, 96, ScreenOrientation.portrait, false, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.landscapeLeft, false, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.landscapeRight, false, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.landscapeRight, true, DisplayTurn.half),
+        (64, 96, ScreenOrientation.portraitUpsideDown, false, DisplayTurn.upright),
+        (96, 64, ScreenOrientation.portraitUpsideDown, false, DisplayTurn.counterclockwise)
     ])
     func publishedFrameCarriesValidatedDisplayTurn(
-        width: Int, height: Int, orientation: ScreenOrientation, expected: DisplayTurn
+        width: Int, height: Int, orientation: ScreenOrientation, panelFixedLandscape: Bool, expected: DisplayTurn
     ) async throws {
         let pair = AsyncThrowingStream.makeStream(of: RemoteDisplayFrame.self, throwing: Error.self)
-        let gate = FrameDeliveryGate(continuation: pair.continuation)
+        let gate = FrameDeliveryGate(continuation: pair.continuation, panelFixedLandscape: panelFixedLandscape)
         defer { gate.finish() }
         gate.activate(token: 1)
         try gate.receive(

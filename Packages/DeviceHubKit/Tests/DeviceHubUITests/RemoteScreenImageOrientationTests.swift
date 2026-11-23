@@ -21,7 +21,7 @@ struct RemoteScreenImageOrientationTests {
         ))
         // The carried turn is authoritative even when dimensions suggest another one.
         let cases: [(DisplayTurn, Image.Orientation)] = [
-            (.upright, .up), (.clockwise, .right), (.counterclockwise, .left)
+            (.upright, .up), (.clockwise, .right), (.counterclockwise, .left), (.half, .down)
         ]
         for (turn, expected) in cases {
             let frame = RemoteDisplayFrame(metadata: metadata, image: image, displayTurn: turn)

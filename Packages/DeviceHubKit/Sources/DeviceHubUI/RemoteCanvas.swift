@@ -249,6 +249,7 @@ extension RemoteScreenLayout {
         case .upright: .up
         case .clockwise: .right
         case .counterclockwise: .left
+        case .half: .down
         }
     }
 }

@@ -21,6 +21,7 @@
     enum FixtureRemoteScreen {
         case phonePortrait
         case tabletLandscape
+        case tabletLandscapePanelFixed
         case tabletPortraitLandscapeCoded
 
         var geometry: FixtureRemoteGeometry {
@@ -33,12 +34,13 @@
                     pixelSize: PixelSize(width: 1179, height: 2556)
                 )
 
-            case .tabletLandscape:
+            case .tabletLandscape, .tabletLandscapePanelFixed:
                 FixtureRemoteGeometry(
                     imageHeight: 1024,
                     imageWidth: 1366,
                     orientation: .landscapeRight,
-                    pixelSize: PixelSize(width: 2064, height: 2752)
+                    pixelSize: PixelSize(width: 2064, height: 2752),
+                    displayTurn: self == .tabletLandscapePanelFixed ? .half : .upright
                 )
 
             case .tabletPortraitLandscapeCoded:
@@ -69,7 +71,29 @@
         case unexpectedScenario
     }
 
-    extension VisualScenario {
+    enum VisualScenario: String, CaseIterable {
+        case emptyIPhoneLight
+        case pairingIPhoneDark
+        case connectingIPhoneLight
+        case liveIPhoneDark
+        case liveIPadLight
+        case liveIPadDark
+        case liveLandscapeIPadTargetIPhoneDark
+        case livePortraitIPadTargetLandscapeCodedIPadDark
+        case landscapeRightPanelFixedIPad
+        case offlineIPhoneDark
+        case lockedIPhoneAccessibility
+        case developerModeIPadAccessibility
+        case localNetworkDeniedIPadDark
+        case deviceBusyIPhoneDark
+        case developerImageUnavailableIPadLight
+        case developerImageIncompatibleIPhoneDark
+        case xcodePreparationIPadLight
+        case deviceDetailsPendingVersionIPadLight
+        case aboutNoticesIPadLight
+        case noticesUnavailableIPhoneDark
+        case viewingOnlyIPadLight
+
         var appearance: UIUserInterfaceStyle {
             switch self {
             case .emptyIPhoneLight,
@@ -88,6 +112,7 @@
                  .liveIPhoneDark,
                  .liveLandscapeIPadTargetIPhoneDark,
                  .livePortraitIPadTargetLandscapeCodedIPadDark,
+                 .landscapeRightPanelFixedIPad,
                  .offlineIPhoneDark,
                  .noticesUnavailableIPhoneDark,
                  .developerImageIncompatibleIPhoneDark,
