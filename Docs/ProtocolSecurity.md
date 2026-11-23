@@ -212,6 +212,10 @@ Allowed diagnostics include phase transitions, redacted typed errors, latency,
 codec name, frame age, cancellation outcome, and reconnect outcome. The local
 store is bounded and accepts only the typed event vocabulary.
 
+With `DEVICE_HUB_BOOTSTRAP_TRACE=1`, print-only video traces report the rejection
+case and queue depth, sampled consumer lag (admitted access units minus decoder
+submissions), and the decoder error case when available.
+
 Remote diagnostics are off by default. A build must explicitly provide a
 destination, and the user must enable sharing before any diagnostic event is
 uploaded. The app displays the destination host while sharing is enabled.

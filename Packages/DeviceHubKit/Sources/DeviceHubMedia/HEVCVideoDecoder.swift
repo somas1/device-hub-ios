@@ -33,6 +33,7 @@ public actor HEVCVideoDecoder {
 
     private let generation: SessionGeneration
     private let gate: FrameDeliveryGate
+    private let consumerLag: VideoConsumerLag?
     private var nextPipelineToken: UInt64 = 1
     private var nextPresentationTimeValue: Int64 = 0
     private var pipeline: DecoderPipeline?
@@ -41,6 +42,14 @@ public actor HEVCVideoDecoder {
 
     /// Creates a decoder permanently scoped to one connection generation and target.
     public init(generation: SessionGeneration, panelFixedLandscape: Bool = false) {
+        self.init(generation: generation, panelFixedLandscape: panelFixedLandscape, consumerLag: nil)
+    }
+
+    package init(
+        generation: SessionGeneration,
+        panelFixedLandscape: Bool,
+        consumerLag: VideoConsumerLag?
+    ) {
         let pair = AsyncThrowingStream.makeStream(
             of: RemoteDisplayFrame.self,
             throwing: Error.self,
@@ -58,6 +67,7 @@ public actor HEVCVideoDecoder {
         frames = pair.stream
         self.generation = generation
         self.gate = gate
+        self.consumerLag = consumerLag
     }
 
     isolated deinit {
@@ -120,13 +130,16 @@ public actor HEVCVideoDecoder {
         )
         tracedDecodeCount += 1
         let shouldTrace =
-            tracedDecodeCount <= 10 || tracedDecodeCount.isMultiple(of: 60)
+            DeviceHubMediaTrace.isEnabled
+                && (tracedDecodeCount <= 10 || tracedDecodeCount.isMultiple(of: 60))
+        consumerLag?.submit()
         if shouldTrace {
             DeviceHubMediaTrace.emit(
                 "decoder_submit ordinal=\(tracedDecodeCount) "
                     + "sequence=\(input.sample.sequenceNumber) "
                     + "sync=\(input.sample.isSync) "
                     + "bytes=\(input.sample.bytes.count)"
+                    + (consumerLag.map { " consumer_lag=\($0.count)" } ?? "")
             )
         }
         var infoFlags = VTDecodeInfoFlags()
@@ -134,7 +147,8 @@ public actor HEVCVideoDecoder {
             gate: gate,
             token: pipeline.token,
             metadata: metadata,
-            shouldTrace: shouldTrace
+            shouldTrace: shouldTrace,
+            consumerLag: consumerLag
         )
         let status = VTDecompressionSessionDecodeFrame(
             pipeline.session,
@@ -334,7 +348,8 @@ private func makeDecodeCompletion(
     gate: FrameDeliveryGate,
     token: UInt64,
     metadata: FrameMetadata,
-    shouldTrace: Bool
+    shouldTrace: Bool,
+    consumerLag: VideoConsumerLag?
 ) -> DecodeCompletion {
     { status, infoFlags, imageBuffer, _, _, _ in
         if shouldTrace {
@@ -343,6 +358,7 @@ private func makeDecodeCompletion(
                     + "status=\(status) "
                     + "dropped=\(infoFlags.contains(.frameDropped)) "
                     + "image=\(imageBuffer != nil)"
+                    + (consumerLag.map { " consumer_lag=\($0.count)" } ?? "")
             )
         }
         gate.receive(

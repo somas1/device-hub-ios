@@ -68,6 +68,7 @@ actor RemoteSessionOperation {
     private var nativeSession: NativeSession?
     private let now: @Sendable () -> Date
     private let observe: Observation
+    let observeDecoderFailure: @Sendable (MediaDecoderError, DiagnosticStage) async -> Void
     private let observeInputCleanup: @Sendable (NativeSessionFailure) async -> Void
     private let persistence: PairingPersistenceClient
     var frameTask: Task<Void, Never>?
@@ -107,6 +108,7 @@ actor RemoteSessionOperation {
             persistence: environment.persistence,
             bonjour: environment.bonjour,
             observe: environment.observe,
+            observeDecoderFailure: environment.observeDecoderFailure,
             observeInputCleanup: environment.observeInputCleanup,
             now: environment.now,
             commands: commands,
@@ -138,6 +140,7 @@ actor RemoteSessionOperation {
         persistence: PairingPersistenceClient,
         bonjour: RemotePairingBonjourClient,
         observe: @escaping Observation,
+        observeDecoderFailure: @escaping @Sendable (MediaDecoderError, DiagnosticStage) async -> Void,
         observeInputCleanup: @escaping @Sendable (NativeSessionFailure) async -> Void,
         now: @escaping @Sendable () -> Date,
         commands: NativeCommandExecutor,
@@ -158,6 +161,7 @@ actor RemoteSessionOperation {
         self.nativeSession = nativeSession
         self.now = now
         self.observe = observe
+        self.observeDecoderFailure = observeDecoderFailure
         self.observeInputCleanup = observeInputCleanup
         self.persistence = persistence
         summary = initialDevice
@@ -168,7 +172,7 @@ actor RemoteSessionOperation {
             throw DeviceHubError.connectionLost
         }
         if let videoEvents = nativeSession.videoEvents {
-            startDecoder()
+            startDecoder(for: videoEvents)
             mediaTask = Task {
                 await consumeVideo(videoEvents)
             }
