@@ -17,11 +17,22 @@ extension RemoteSessionFeature {
 
             switch lifecycle {
             case .active:
-                guard previousLifecycle == .background else {
+                guard previousLifecycle == .background
+                    || (previousLifecycle == .inactive && state.session == nil)
+                else {
                     return .none
                 }
                 let resumeViewing = !state.isViewingStopped
                 state.pendingInputCleanup?.resumeViewing = resumeViewing
+                if previousLifecycle == .inactive, state.isObservingAvailability {
+                    guard let device = state.selectedDevice,
+                          device.pairingState == .paired,
+                          device.reachability == .reachable
+                    else {
+                        return .none
+                    }
+                    return beginSessionIfPossible(state: &state, device: device)
+                }
                 return .send(.task)
 
             case .background:

@@ -54,6 +54,11 @@ Changing targets performs this sequence:
 6. Clear the old image.
 7. Create the next generation.
 
+When the app becomes active again after being inactive with no session, it uses
+the running availability stream's roster to reconnect a reachable paired
+selection or waits for a reachable snapshot. If availability observation has
+ended, it reloads the roster to start observation again.
+
 Stop Viewing lasts for the lifetime of the feature across roster, selection,
 and lifecycle changes. Automatic reconnection and cleanup completion honor
 it. Only Start Viewing clears it, with an active app, a paired selection,
