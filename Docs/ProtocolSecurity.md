@@ -180,6 +180,9 @@ visible, typed failure rather than an implicit mounting flow.
   target orientation, then clamped to target pixels.
 - HID writes are serialized. Cancellation performs best-effort releases,
   including modifiers in reverse order.
+- The ready loop rotates polling priority among queued controls, video
+  datagrams, and periodic feedback, with cancellation and the first-frame
+  deadline taking priority.
 - Touch and the stateful virtual keyboard use UniversalHID. Hardware buttons
   use Indigo. Keyboard chords update one UniversalHID usage bitmap, and
   cancellation clears the complete bitmap before teardown.

@@ -191,9 +191,26 @@ pub(crate) enum ControlCommand {
     ReleaseAllInput,
 }
 
+pub(crate) struct QueuedControlCommand {
+    pub(crate) command: ControlCommand,
+    /// Captured only for bootstrap tracing.
+    pub(crate) enqueued_at: Option<tokio::time::Instant>,
+}
+
+impl QueuedControlCommand {
+    fn new(command: ControlCommand) -> Self {
+        let trace_enabled = std::env::var_os("DEVICE_HUB_BOOTSTRAP_TRACE").as_deref()
+            == Some(std::ffi::OsStr::new("1"));
+        Self {
+            command,
+            enqueued_at: trace_enabled.then(tokio::time::Instant::now),
+        }
+    }
+}
+
 /// Protocol-owned receive side and readiness gates for generation-safe control.
 pub(crate) struct ControlGate {
-    receiver: mpsc::Receiver<ControlCommand>,
+    receiver: mpsc::Receiver<QueuedControlCommand>,
     input_ready: Arc<AtomicBool>,
     cleanup_needed: Arc<AtomicBool>,
     video_control_ready: Arc<AtomicBool>,
@@ -206,7 +223,7 @@ impl ControlGate {
         self.input_ready.store(true, Ordering::Release);
     }
 
-    pub(crate) async fn receive(&mut self) -> Option<ControlCommand> {
+    pub(crate) async fn receive(&mut self) -> Option<QueuedControlCommand> {
         self.receiver.recv().await
     }
 }
@@ -236,9 +253,29 @@ pub(crate) struct EventEmitterTestFixture {
 }
 
 #[cfg(test)]
+pub(crate) struct ControlGateTestSender(mpsc::Sender<QueuedControlCommand>);
+
+#[cfg(test)]
+impl ControlGateTestSender {
+    pub(crate) async fn send(
+        &self,
+        command: ControlCommand,
+    ) -> Result<(), mpsc::error::SendError<QueuedControlCommand>> {
+        self.0.send(QueuedControlCommand::new(command)).await
+    }
+
+    pub(crate) fn capacity(&self) -> usize {
+        self.0.capacity()
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.0.is_closed()
+    }
+}
+
+#[cfg(test)]
 /// Creates an actual control gate and exposes its input-readiness lifetime flag.
-pub(crate) fn control_gate_test_fixture()
--> (ControlGate, mpsc::Sender<ControlCommand>, Arc<AtomicBool>) {
+pub(crate) fn control_gate_test_fixture() -> (ControlGate, ControlGateTestSender, Arc<AtomicBool>) {
     let (sender, receiver) = mpsc::channel(8);
     let input_ready = Arc::new(AtomicBool::new(false));
     let gate = ControlGate {
@@ -248,7 +285,7 @@ pub(crate) fn control_gate_test_fixture()
         video_control_ready: Arc::default(),
         video_negotiation_pending: Arc::default(),
     };
-    (gate, sender, input_ready)
+    (gate, ControlGateTestSender(sender), input_ready)
 }
 
 #[cfg(test)]
@@ -644,7 +681,7 @@ pub(crate) struct Session {
     acknowledgements: mpsc::Sender<PersistenceAck>,
     callbacks_enabled: Arc<AtomicBool>,
     cancel: watch::Sender<bool>,
-    controls: mpsc::Sender<ControlCommand>,
+    controls: mpsc::Sender<QueuedControlCommand>,
     dispatcher: Option<JoinHandle<()>>,
     emitter: EventEmitter,
     generation: DhGeneration,
@@ -1131,14 +1168,16 @@ impl Session {
         command: ControlCommand,
         stage: &'static str,
     ) -> Result<(), PublicFailure> {
-        self.controls.try_send(command).map_err(|_| {
-            PublicFailure::new(
-                "control_queue_unavailable",
-                stage,
-                true,
-                "The bounded native control queue cannot accept this command.",
-            )
-        })
+        self.controls
+            .try_send(QueuedControlCommand::new(command))
+            .map_err(|_| {
+                PublicFailure::new(
+                    "control_queue_unavailable",
+                    stage,
+                    true,
+                    "The bounded native control queue cannot accept this command.",
+                )
+            })
     }
 
     pub(crate) fn shutdown(&mut self) -> DhStatus {
