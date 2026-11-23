@@ -408,6 +408,7 @@ async fn run_remote(
     )
     .await?;
     let snapshot = rsd_snapshot(&handshake, &operation.target)?;
+    let is_ipad = snapshot.product_type.starts_with("iPad");
     emitter.rsd_ready(snapshot)?;
 
     emitter.phase(
@@ -446,6 +447,7 @@ async fn run_remote(
             run_control_stream(
                 &mut adapter,
                 &mut handshake,
+                is_ipad,
                 &emitter,
                 &media,
                 controls,
