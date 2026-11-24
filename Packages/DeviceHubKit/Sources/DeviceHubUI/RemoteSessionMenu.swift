@@ -4,14 +4,14 @@ import SwiftUI
 /// The corner menu carries session options and actions outside the quick controls.
 struct RemoteSessionMenu: View, Equatable {
     enum ControlItem: CaseIterable {
-        case home, lock, keyboard, rotate
+        case home, lock, clipboard, keyboard, rotate
     }
 
     let acceptsInput: Bool
     let isViewingStopped: Bool
     let canStartViewing: Bool
     let hasActiveSession: Bool
-    /// Hides Home, Lock, Volume Up, Volume Down, and Mute when the bar shows them.
+    /// Hides Home, Lock, Clipboard, and the volume controls when the bar shows them.
     let hidesQuickControlItems: Bool
     let devices: [DeviceSummary]
     let selectedDeviceID: DeviceID?
@@ -19,6 +19,7 @@ struct RemoteSessionMenu: View, Equatable {
     let buttonTapped: (DeviceButton) -> Void
     let deviceSelected: (_ deviceID: DeviceID) -> Void
     let detailsButtonTapped: () -> Void
+    let keyTapped: (DeviceKey, KeyModifiers) -> Void
     let keyboardButtonTapped: () -> Void
     let pairButtonTapped: () -> Void
     let reconnectButtonTapped: () -> Void
@@ -69,6 +70,10 @@ struct RemoteSessionMenu: View, Equatable {
                             Button("Home", systemImage: "house") { buttonTapped(.home) }
                         case .lock:
                             Button("Lock", systemImage: "lock") { buttonTapped(.lock) }
+                        case .clipboard:
+                            Menu("Clipboard", systemImage: "doc.on.clipboard") {
+                                ClipboardShortcut.menuItems(keyTapped: keyTapped)
+                            }
                         case .keyboard:
                             Button("Keyboard", systemImage: "keyboard", action: keyboardButtonTapped)
                         case .rotate:
