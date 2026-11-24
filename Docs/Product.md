@@ -48,12 +48,16 @@ There is no dashboard and no Devices, Control, Logs, or Settings tab bar.
   Display, type on the remote device whenever input is enabled; the Keyboard
   control is needed only for the on-screen keyboard. If another controller
   control takes focus, it keeps Tab and arrow keys until the user taps or
-  touches the remote screen. While Device Hub holds focus, Tab goes to the
-  remote device. The on-screen keyboard's Done and system dismiss keys hide it
-  without dropping hardware keys. Keys are not forwarded while a sheet or alert
-  covers the window, and focus returns after it closes. Held keys are released
-  when the scene deactivates or the window resigns key. Paste is refused unless
-  the on-screen keyboard is shown; then it types the clipboard to the device.
+  touches the remote screen. While Device Hub holds focus, Tab and printable
+  ASCII shortcuts using Command or Control go to the remote device. The
+  controller OS keeps reserved shortcuts such as Cmd+Tab and Cmd+Space.
+  Hardware Cmd+V sends a key press so the remote device uses its own clipboard.
+  The edit menu's Paste action types the controller clipboard to the remote
+  device and is available only with the on-screen keyboard shown. The on-screen
+  keyboard's Done and system dismiss keys hide it without dropping hardware
+  keys. A sheet or alert temporarily takes keyboard focus, which returns after
+  it closes. Held keys are released when the scene deactivates or the window
+  resigns key.
 
 After Stop Viewing, choosing or pairing a device, returning to the app, and
 using Retry leave viewing stopped. Start Viewing is available when the app
