@@ -17,7 +17,7 @@ The app hard-targets iOS/iPadOS 27 and uses current SwiftUI directly:
 - transformed `onGeometryChange` values only when layout geometry must enter
   feature state;
 - a 44-point More menu near the top-right corner that includes Rotate, with
-  five quick controls in a capsule beside it at regular width when a device
+  eight quick controls in a capsule beside it at regular width when a device
   is selected;
 - no bottom action bar, trailing control rail, or app-added canvas padding.
 

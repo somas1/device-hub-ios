@@ -14,11 +14,16 @@ struct RemoteSessionQuickControlsTests {
         #expect(enabled != disabled)
     }
 
-    @Test("The bar fits six 44-point controls with five gaps")
-    func fitsSixControls() {
+    @Test("The bar fits eight 44-point controls with seven gaps")
+    func fitsEightControls() {
         let controls = RemoteSessionQuickControls(acceptsInput: true, buttonTapped: { _ in }, keyTapped: { _, _ in })
 
-        #expect(ImageRenderer(content: controls).cgImage?.width == 6 * 44 + 5 * 8)
+        #expect(ImageRenderer(content: controls).cgImage?.width == 8 * 44 + 7 * 8)
+    }
+
+    @Test("Cut, Copy and Paste each have their own bar button")
+    func clipboardButtons() {
+        #expect(ClipboardShortcut.allCases.map(\.symbol) == ["scissors", "doc.on.doc", "doc.on.clipboard"])
     }
 
     @Test("Quick controls require regular width and a selected device")

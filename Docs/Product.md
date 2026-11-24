@@ -44,7 +44,8 @@ There is no dashboard and no Devices, Control, Logs, or Settings tab bar.
   app.
 - Clipboard transfer is explicit. Automatic clipboard synchronization is not a
   first-release feature.
-- The Clipboard control offers Cut, Copy, and Paste when remote input is
+- Cut, Copy, and Paste are separate buttons in the quick-control bar, and a
+  Clipboard submenu of More when the bar is hidden, when remote input is
   available. Each action sends one keyboard shortcut to the remote device,
   which uses its own selection and clipboard. Device Hub never accesses or
   transfers clipboard contents for these actions.
