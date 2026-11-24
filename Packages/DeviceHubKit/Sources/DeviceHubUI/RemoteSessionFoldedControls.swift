@@ -1,3 +1,4 @@
+import DeviceHubCore
 import SwiftUI
 
 // Direct controls exist only while an active native division overlaps the
@@ -35,6 +36,7 @@ struct RemoteSessionFoldedControls: View {
     let isKeyboardPresented: Bool
     let home: () -> Void
     let lock: () -> Void
+    let keyTapped: (DeviceKey, KeyModifiers) -> Void
     let keyboard: () -> Void
     let rotate: () -> Void
 
@@ -43,20 +45,28 @@ struct RemoteSessionFoldedControls: View {
             Text("Remote Controls")
                 .font(.headline)
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) {
+            ViewThatFits {
+                HStack(spacing: 8) {
                     buttons
                 }
 
-                VStack(spacing: 16) {
-                    buttons
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) { hardwareButtons }
+                    clipboardMenu
+                    HStack(spacing: 8) { sessionButtons }
+                }
+
+                ScrollView {
+                    VStack(spacing: 8) { buttons }
+                        .frame(maxWidth: .infinity)
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
             .disabled(!acceptsInput)
         }
-        .padding(24)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
         .accessibilityIdentifier("folded-remote-controls")
@@ -64,10 +74,25 @@ struct RemoteSessionFoldedControls: View {
 
     @ViewBuilder
     private var buttons: some View {
+        hardwareButtons
+        clipboardMenu
+        sessionButtons
+    }
+
+    @ViewBuilder
+    private var hardwareButtons: some View {
         Button("Home", systemImage: "house", action: home)
-
         Button("Lock", systemImage: "lock", action: lock)
+    }
 
+    private var clipboardMenu: some View {
+        Menu("Clipboard", systemImage: "doc.on.clipboard") {
+            ClipboardShortcut.menuItems(keyTapped: keyTapped)
+        }
+    }
+
+    @ViewBuilder
+    private var sessionButtons: some View {
         Button("Keyboard", systemImage: "keyboard", action: keyboard)
             .accessibilityValue(isKeyboardPresented ? "Shown" : "Hidden")
 
@@ -96,6 +121,7 @@ struct RemoteSessionFoldedControls: View {
                         isKeyboardPresented: false,
                         home: {},
                         lock: {},
+                        keyTapped: { _, _ in },
                         keyboard: {},
                         rotate: {}
                     ),
@@ -111,6 +137,7 @@ struct RemoteSessionFoldedControls: View {
                         buttonTapped: { _ in },
                         deviceSelected: { _ in },
                         detailsButtonTapped: {},
+                        keyTapped: { _, _ in },
                         keyboardButtonTapped: {},
                         pairButtonTapped: {},
                         reconnectButtonTapped: {},
@@ -131,6 +158,7 @@ struct RemoteSessionFoldedControls: View {
             isKeyboardPresented: false,
             home: {},
             lock: {},
+            keyTapped: { _, _ in },
             keyboard: {},
             rotate: {}
         )
@@ -143,6 +171,7 @@ struct RemoteSessionFoldedControls: View {
             isKeyboardPresented: false,
             home: {},
             lock: {},
+            keyTapped: { _, _ in },
             keyboard: {},
             rotate: {}
         )

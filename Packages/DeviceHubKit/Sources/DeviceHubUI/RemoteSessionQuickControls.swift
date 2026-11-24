@@ -4,6 +4,7 @@ import SwiftUI
 struct RemoteSessionQuickControls: View, Equatable {
     let acceptsInput: Bool
     let buttonTapped: (DeviceButton) -> Void
+    let keyTapped: (DeviceKey, KeyModifiers) -> Void
 
     /// Ignore action closures recreated by the parent on each video frame.
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -17,6 +18,14 @@ struct RemoteSessionQuickControls: View, Equatable {
             button("Volume Up", symbol: "speaker.plus") { buttonTapped(.volumeUp) }
             button("Volume Down", symbol: "speaker.minus") { buttonTapped(.volumeDown) }
             button("Mute", symbol: "speaker.slash") { buttonTapped(.mute) }
+            Menu {
+                ClipboardShortcut.menuItems(keyTapped: keyTapped)
+            } label: {
+                icon("doc.on.clipboard")
+            }
+            .menuIndicator(.hidden)
+            .accessibilityLabel("Clipboard")
+            .accessibilityHint(inputHint)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white.opacity(acceptsInput ? 0.85 : 0.4))
@@ -26,12 +35,20 @@ struct RemoteSessionQuickControls: View, Equatable {
 
     private func button(_ title: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 14, weight: .medium))
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
+            icon(symbol)
         }
         .accessibilityLabel(Text(title))
-        .accessibilityHint(acceptsInput ? Text("") : Text("Available when the remote screen is live."))
+        .accessibilityHint(inputHint)
+    }
+
+    private func icon(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 14, weight: .medium))
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+    }
+
+    private var inputHint: Text {
+        acceptsInput ? Text("") : Text("Available when the remote screen is live.")
     }
 }

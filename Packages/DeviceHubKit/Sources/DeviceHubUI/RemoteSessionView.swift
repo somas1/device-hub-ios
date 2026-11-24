@@ -118,7 +118,8 @@ struct RemoteSessionView: View {
         HStack(spacing: 8) {
             RemoteSessionQuickControls(
                 acceptsInput: store.acceptsInput,
-                buttonTapped: hardwareButtonTapped
+                buttonTapped: hardwareButtonTapped,
+                keyTapped: keyTapped
             )
             .equatable()
 
@@ -172,6 +173,7 @@ struct RemoteSessionView: View {
             buttonTapped: hardwareButtonTapped,
             deviceSelected: deviceSelected,
             detailsButtonTapped: detailsButtonTapped,
+            keyTapped: keyTapped,
             keyboardButtonTapped: keyboardButtonTapped,
             pairButtonTapped: pairButtonTapped,
             reconnectButtonTapped: reconnectButtonTapped,
@@ -187,6 +189,7 @@ struct RemoteSessionView: View {
             isKeyboardPresented: isKeyboardPresented,
             home: { hardwareButtonTapped(.home) },
             lock: { hardwareButtonTapped(.lock) },
+            keyTapped: keyTapped,
             keyboard: keyboardButtonTapped,
             rotate: rotateButtonTapped
         )
