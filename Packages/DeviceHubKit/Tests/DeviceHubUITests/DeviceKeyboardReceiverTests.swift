@@ -45,103 +45,6 @@
             #expect(edgeCommands.isEmpty)
         }
 
-        @Test(
-            "hardware editing shortcuts send exactly one modified key tap",
-            arguments: ["c", "v", "x", "a", "z"], [false, true]
-        )
-        func hardwareEditingShortcuts(input: String, softwareKeyboardShown: Bool) throws {
-            let textField = DeviceKeyboardTextField()
-            textField.setSoftwareKeyboardShown(softwareKeyboardShown)
-            var taps: [DeviceCommand] = []
-            textField.onKeyTapped = { taps.append(.keyTap($0, modifiers: $1)) }
-
-            let command = try shortcut(input, modifiers: .command, in: textField)
-            let action = try #require(command.action)
-            let paste = #selector(UIResponderStandardEditActions.paste(_:))
-            try #require(action != paste)
-            #expect(!textField.canPerformAction(paste, withSender: command))
-            #expect(textField.canPerformAction(action, withSender: command))
-            _ = textField.perform(action, with: command)
-
-            #expect(taps == [.keyTap(.character(Character(input)), modifiers: .command)])
-            #expect(textField.text?.isEmpty != false)
-        }
-
-        @Test("hardware redo keeps Shift and Control chords keep Control")
-        func additionalShortcutModifiers() throws {
-            let textField = DeviceKeyboardTextField()
-            var taps: [DeviceCommand] = []
-            textField.onKeyTapped = { taps.append(.keyTap($0, modifiers: $1)) }
-
-            let redo = try shortcut("z", modifiers: [.command, .shift], in: textField)
-            let control = try shortcut("/", modifiers: .control, in: textField)
-            _ = try textField.perform(#require(redo.action), with: redo)
-            _ = try textField.perform(#require(control.action), with: control)
-
-            #expect(taps == [
-                .keyTap(.character("z"), modifiers: [.command, .shift]),
-                .keyTap(.character("/"), modifiers: .control)
-            ])
-        }
-
-        @Test("plain letters and unsupported shortcut inputs stay out of the shortcut path")
-        func unsupportedShortcutInputsLeaveTypingAvailable() throws {
-            let textField = DeviceKeyboardTextField()
-            var taps: [DeviceCommand] = []
-            textField.onKeyTapped = { taps.append(.keyTap($0, modifiers: $1)) }
-            let supportedCommand = try shortcut("c", modifiers: .command, in: textField)
-            let action = try #require(supportedCommand.action)
-
-            let ignoredInputs: [(String, UIKeyModifierFlags)] = [
-                ("a", []), ("é", .command), ("\t", .control), ("ab", .command)
-            ]
-            for (input, modifiers) in ignoredInputs {
-                let command = UIKeyCommand(input: input, modifierFlags: modifiers, action: action)
-                _ = textField.perform(action, with: command)
-            }
-            #expect(taps.isEmpty)
-
-            let shouldInsert = textField.delegate?.textField?(
-                textField,
-                shouldChangeCharactersIn: NSRange(location: 0, length: 0),
-                replacementString: "a"
-            )
-            #expect(shouldInsert == false)
-            #expect(taps == [.keyTap(.character("a"), modifiers: [])])
-        }
-
-        @available(iOS, deprecated: 26.0, message: "Exercises pre-scene responder attachment.")
-        @Test("a shortcut yields to a covering sheet or alert")
-        func coveredShortcut() throws {
-            let window = UIWindow()
-            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-            let controller = KeyboardCoverViewController()
-            let textField = DeviceKeyboardTextField()
-            window.rootViewController = controller
-            controller.view.addSubview(textField)
-            window.makeKeyAndVisible()
-            defer { window.isHidden = true }
-            try #require(textField.window === window)
-            var taps: [DeviceCommand] = []
-            textField.onKeyTapped = { taps.append(.keyTap($0, modifiers: $1)) }
-            let command = try shortcut("v", modifiers: .command, in: textField)
-
-            controller.isCovered = true
-            _ = try textField.perform(#require(command.action), with: command)
-
-            #expect(taps.isEmpty)
-        }
-
-        private func shortcut(
-            _ input: String,
-            modifiers: UIKeyModifierFlags,
-            in textField: DeviceKeyboardTextField
-        ) throws -> UIKeyCommand {
-            try #require(textField.keyCommands?.first {
-                $0.input == input && $0.modifierFlags == modifiers && $0.wantsPriorityOverSystemBehavior
-            })
-        }
-
         @Test("closing releases held keys once in reverse press order")
         func releaseAll() {
             var ledger = DeviceKeyboardPressedKeyLedger()
@@ -222,14 +125,6 @@
             #expect(repeatedRelease == nil)
             let trailingReleases = ledger.releaseAll()
             #expect(trailingReleases.isEmpty)
-        }
-    }
-
-    private final class KeyboardCoverViewController: UIViewController {
-        var isCovered = false
-
-        override var presentedViewController: UIViewController? {
-            isCovered ? UIViewController() : nil
         }
     }
 #endif

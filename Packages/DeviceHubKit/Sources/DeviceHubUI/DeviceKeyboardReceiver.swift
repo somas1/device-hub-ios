@@ -118,37 +118,6 @@ struct DeviceKeyboardReceiver: View {
         private var isReacquireScheduled = false
         var pressedSpecialKeys = DeviceKeyboardPressedKeyLedger()
 
-        private static let printableASCII: ClosedRange<UInt8> = 0x20 ... 0x7E
-        private lazy var hardwareShortcutCommands: [UIKeyCommand] = {
-            // Register lowercase letter equivalents and carry Shift in the flags.
-            let inputs = Self.printableASCII
-                .filter { !(0x41 ... 0x5A).contains($0) }
-                .map { String(UnicodeScalar($0)) }
-            let requiredModifiers: [UIKeyModifierFlags] = [.command, .control, [.command, .control]]
-            let extraModifiers: [UIKeyModifierFlags] = [[], .shift, .alternate, [.shift, .alternate]]
-
-            return requiredModifiers.flatMap { required in
-                extraModifiers.flatMap { extra in
-                    inputs.map { input in
-                        let command = UIKeyCommand(
-                            input: input,
-                            modifierFlags: required.union(extra),
-                            action: #selector(forwardHardwareShortcut(_:))
-                        )
-                        // Let the chord reach the remote before UIKit handles local edits.
-                        command.wantsPriorityOverSystemBehavior = true
-                        command.allowsAutomaticLocalization = false
-                        command.allowsAutomaticMirroring = false
-                        return command
-                    }
-                }
-            }
-        }()
-
-        override var keyCommands: [UIKeyCommand]? {
-            hardwareShortcutCommands + (super.keyCommands ?? [])
-        }
-
         override init(frame: CGRect) {
             super.init(frame: frame)
             configure()
@@ -258,37 +227,14 @@ struct DeviceKeyboardReceiver: View {
             }
         }
 
-        /// Only explicit edit-menu Paste with the software keyboard shown may
-        /// type the controller clipboard. Hardware shortcuts use their own action.
+        /// Clipboard transfer stays explicit: in hardware-only mode (focus held for
+        /// the whole session) paste is refused, so Cmd+V cannot type the local
+        /// clipboard remotely. With the software keyboard shown, paste types it.
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-            if action == #selector(paste(_:)), inputView != nil || sender is UIKeyCommand {
+            if action == #selector(paste(_:)), inputView != nil {
                 return false
             }
             return super.canPerformAction(action, withSender: sender)
-        }
-
-        @objc private func forwardHardwareShortcut(_ command: UIKeyCommand) {
-            guard !yieldIfCovered(),
-                  let shortcut = Self.hardwareShortcut(input: command.input, flags: command.modifierFlags)
-            else {
-                return
-            }
-            tap(shortcut.key, modifiers: shortcut.modifiers)
-        }
-
-        private static func hardwareShortcut(
-            input: String?,
-            flags: UIKeyModifierFlags
-        ) -> (key: DeviceKey, modifiers: KeyModifiers)? {
-            // The transport maps every printable ASCII character to a HID usage.
-            guard !flags.isDisjoint(with: [.command, .control]),
-                  let input, input.utf8.count == 1,
-                  let character = input.first,
-                  let ascii = character.asciiValue, printableASCII.contains(ascii)
-            else {
-                return nil
-            }
-            return (.character(character), flags.deviceHubModifiers)
         }
 
         /// Hides the on-screen keyboard; hardware keys stay live.
