@@ -1012,6 +1012,256 @@ fn landscape_shaped_geometry(orientation: DhOrientation) -> DhDisplayGeometry {
     }
 }
 
+/// Preload the real userspace UDP socket over a fake tunnel.
+async fn preload_video_udp<'a>(
+    payloads: impl IntoIterator<Item = &'a [u8]>,
+) -> (tcp::handle::UdpSocketHandle, tokio::io::DuplexStream) {
+    use tcp::packets::{Ipv6Packet, ProtocolNumber, UdpPacket};
+    use tokio::io::AsyncWriteExt;
+
+    let host_ip: std::net::Ipv6Addr = "2001:db8::1".parse().unwrap();
+    let peer_ip: std::net::Ipv6Addr = "2001:db8::2".parse().unwrap();
+    let (mut tunnel, transport) = tokio::io::duplex(32 * 1024);
+    let adapter = tcp::adapter::Adapter::new(Box::new(transport), host_ip.into(), peer_ip.into())
+        .to_async_handle();
+    let video_udp = adapter.bind_udp(0).await.unwrap();
+    let barrier_udp = adapter.bind_udp(0).await.unwrap();
+    let packet = |port, payload: &[u8]| {
+        let udp = UdpPacket::create(peer_ip.into(), host_ip.into(), 5000, port, payload);
+        Ipv6Packet::create(peer_ip, host_ip, ProtocolNumber::Udp, 64, &udp)
+    };
+    let rtcp = [0x80, 201, 0, 1, 0, 0, 0, 1];
+    let mut datagrams: Vec<u8> = payloads
+        .into_iter()
+        .flat_map(|payload| packet(video_udp.local_port(), payload))
+        .collect();
+    datagrams.extend(packet(barrier_udp.local_port(), &rtcp));
+    tunnel.write_all(&datagrams).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), barrier_udp.recv())
+        .await
+        .expect("The fake tunnel must preload the video receive queue")
+        .unwrap();
+    (video_udp, tunnel)
+}
+
+async fn fake_xpc(
+    transport: impl idevice::ReadWrite + 'static,
+) -> idevice::xpc::RemoteXpcClient<Box<dyn idevice::ReadWrite>> {
+    idevice::xpc::RemoteXpcClient::new(Box::new(transport) as Box<dyn idevice::ReadWrite>)
+        .await
+        .unwrap()
+}
+
+/// A rejected second video packet ends the loop, so later queued packets
+/// cannot hide starvation.
+async fn taps_before_second_video_datagram(queued_taps: usize) -> usize {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    };
+
+    let rtcp = [0x80, 201, 0, 1, 0, 0, 0, 1];
+    let wrong_payload_type_rtp = [0x80, 97, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1];
+    let video_payloads = [rtcp.as_slice(), wrong_payload_type_rtp.as_slice()]
+        .into_iter()
+        .chain(std::iter::repeat_n(rtcp.as_slice(), 256));
+    let (video_udp, _tunnel) = preload_video_udp(video_payloads).await;
+    let socket = || CleanupSocket::new(Arc::new(AtomicU8::new(0)));
+    let universal_socket = socket();
+    let written = universal_socket.written.clone();
+    let mut universal = UniversalHidServiceClient::new(fake_xpc(universal_socket).await);
+    let indigo = IndigoHidClient::new(fake_xpc(socket()).await);
+    let orientation = OrientationServiceClient::new(fake_xpc(socket()).await);
+    let before_reference_tap = written.load(Ordering::Acquire);
+    universal.tap(1, 2).await.unwrap();
+    let before_stream = written.load(Ordering::Acquire);
+    let tap_bytes = before_stream - before_reference_tap;
+    assert!(tap_bytes > 0);
+
+    let (controls, sender, _) = crate::session::control_gate_test_fixture();
+    controls.enable_input();
+    assert!(queued_taps <= sender.capacity());
+    for _ in 0..queued_taps {
+        sender
+            .send(ControlCommand::Touch(TouchIntent::Tap { x: 1, y: 2 }))
+            .await
+            .unwrap();
+    }
+    tokio::time::advance(Duration::from_millis(125)).await;
+    let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+    let fixture = crate::session::EventEmitterTestFixture::new();
+    let media = MediaEmitter::test_fixture(
+        crate::abi::DhGeneration { high: 1, low: 2 },
+        None,
+        std::ptr::null_mut(),
+    );
+    let video = LiveVideoState {
+        assembler: HevcAccessUnitAssembler::new(96, 1),
+        last_configuration_revision: 1,
+        geometry: landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+    };
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        run_active_control_loop(
+            video_udp,
+            universal,
+            1,
+            indigo,
+            orientation,
+            false,
+            controls,
+            cancellation,
+            video,
+            VideoFeedbackState::new(1, 1, "synthetic".into()),
+            &fixture.emitter(),
+            &media,
+        ),
+    )
+    .await
+    .expect("The ready stream must reach the second video datagram")
+    .expect_err("The second video datagram must be rejected");
+    assert_eq!(result.code, "video_datagram_rejected");
+    let stream_bytes = written.load(Ordering::Acquire) - before_stream;
+    assert_eq!(stream_bytes % tap_bytes, 0, "Each tap must be complete");
+    stream_bytes / tap_bytes
+}
+
+#[tokio::test(start_paused = true)]
+async fn queued_tap_is_delivered_before_second_ready_video_datagram() {
+    assert_eq!(
+        taps_before_second_video_datagram(1).await,
+        1,
+        "The HID tap must complete before the second ready video datagram"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn backlogged_video_progresses_while_input_stays_queued() {
+    let delivered = taps_before_second_video_datagram(8).await;
+    assert!(
+        (1..=2).contains(&delivered),
+        "Both lanes must progress while input is still queued (delivered {delivered} of 8 taps)"
+    );
+}
+
+#[test]
+fn bootstrap_trace_prints_only_redacted_input_timing_to_stdout() {
+    let run_tap = |trace| {
+        std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "protocol::tests::input_tests::queued_tap_is_delivered_before_second_ready_video_datagram",
+                "--nocapture",
+                "--format=terse",
+            ])
+            .env("DEVICE_HUB_BOOTSTRAP_TRACE", trace)
+            .output()
+            .unwrap()
+    };
+    for (trace, expected) in [
+        (
+            "1",
+            &[
+                "devicehub.native input_dequeued kind=touch_tap waited_ms=125",
+                "devicehub.native input_delivered kind=touch_tap",
+            ][..],
+        ),
+        ("0", &[][..]),
+    ] {
+        let output = run_tap(trace);
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        let lines: Vec<_> = stdout
+            .lines()
+            .filter(|line| line.starts_with("devicehub.native input_"))
+            .collect();
+        assert_eq!(lines, expected, "Bootstrap input lines belong on stdout");
+        assert!(!stderr.contains("input_delivered"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn video_queued_during_a_slow_orientation_read_prevents_false_stall() {
+    use super::{
+        SYNTHETIC_64_X_64_SPS, TEST_VIDEO_PAYLOAD_TYPE, TEST_VIDEO_SSRC, test_aggregation_packet,
+        test_media_emitter, test_nal, test_rtp_datagram,
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let config = test_aggregation_packet(&[
+        test_nal(32, &[0x10]),
+        SYNTHETIC_64_X_64_SPS.to_vec(),
+        test_nal(34, &[0x30]),
+    ]);
+    let frame = [
+        test_rtp_datagram(TEST_VIDEO_PAYLOAD_TYPE, 1, 1, true, &test_nal(39, &[0xAA])),
+        test_rtp_datagram(TEST_VIDEO_PAYLOAD_TYPE, 2, 2, true, &config),
+        test_rtp_datagram(TEST_VIDEO_PAYLOAD_TYPE, 3, 3, true, &test_nal(19, &[0xD0])),
+    ];
+    let rtcp = vec![0x80, 201, 0, 1, 0, 0, 0, 1];
+    let terminal_packet = test_rtp_datagram(97, 4, 4, true, &test_nal(39, &[0xAA]));
+    let (video_udp, mut tunnel) = preload_video_udp(
+        frame
+            .iter()
+            .chain([&rtcp, &terminal_packet])
+            .map(Vec::as_slice),
+    )
+    .await;
+    let sink = || CleanupSocket::new(std::sync::Arc::default());
+    let (mut reply, orientation_io) = tokio::io::duplex(4096);
+    let orientation = OrientationServiceClient::new(fake_xpc(orientation_io).await);
+    let (controls, _sender, _) = crate::session::control_gate_test_fixture();
+    let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+    let fixture = crate::session::EventEmitterTestFixture::new();
+    let emitter = fixture.emitter();
+    let capture = super::ProtocolMediaCapture::default();
+    let media = test_media_emitter(&capture);
+    let operation = run_active_control_loop(
+        video_udp,
+        UniversalHidServiceClient::new(fake_xpc(sink()).await),
+        1,
+        IndigoHidClient::new(fake_xpc(sink()).await),
+        orientation,
+        false,
+        controls,
+        cancellation,
+        LiveVideoState {
+            assembler: HevcAccessUnitAssembler::new(TEST_VIDEO_PAYLOAD_TYPE, TEST_VIDEO_SSRC),
+            last_configuration_revision: 0,
+            geometry: landscape_shaped_geometry(DhOrientation::LandscapeLeft),
+        },
+        VideoFeedbackState::new(1, TEST_VIDEO_SSRC, "synthetic".into()),
+        &emitter,
+        &media,
+    );
+    let delayed_orientation = async {
+        tokio::time::sleep(MEDIA_STALL_TIMEOUT + Duration::from_secs(1)).await;
+        reply
+            .write_all(&orientation_reply("portrait", "portrait"))
+            .await
+            .unwrap();
+    };
+    let (result, ()) = tokio::join!(
+        tokio::time::timeout(INPUT_TIMEOUT + Duration::from_secs(1), operation),
+        delayed_orientation,
+    );
+    assert_eq!(
+        result.unwrap().unwrap_err().code,
+        "video_datagram_rejected",
+        "An overdue feedback tick must let a queued video datagram prove the socket is active"
+    );
+    let mut feedback = Vec::new();
+    tokio::time::timeout(Duration::from_secs(1), tunnel.read_to_end(&mut feedback))
+        .await
+        .expect("The fake tunnel must close after the video socket drops")
+        .unwrap();
+    assert!(
+        feedback.windows(4).any(|bytes| bytes == b"RCTL"),
+        "An overdue feedback report must still be sent"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn periodic_orientation_check_relabels_the_live_stream_once_per_change() {
     let run = run_live_loop(

@@ -1,4 +1,6 @@
 use super::*;
+use crate::session::QueuedControlCommand;
+use std::io::Write;
 
 /// How often the live session asks the iPad which way up it is. Turning some
 /// iPads keeps the encoder's configuration, which would otherwise be the only
@@ -165,6 +167,20 @@ pub(super) async fn run_control_stream(
     .await
 }
 
+#[derive(Clone, Copy)]
+enum ReadyLane {
+    Control,
+    Video,
+    Feedback,
+}
+
+enum ReadyWork {
+    Control(Option<QueuedControlCommand>),
+    Video(std::io::Result<tcp::adapter::UdpDatagram>),
+    Feedback { stalled: bool },
+    CheckOrientation,
+}
+
 /// Runs the real ready-stream loop and its input cleanup, after authenticated setup.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_active_control_loop(
@@ -185,8 +201,8 @@ pub(super) async fn run_active_control_loop(
     let first_video_frame_deadline = tokio::time::sleep(FIRST_VIDEO_FRAME_TIMEOUT);
     tokio::pin!(first_video_frame_deadline);
     let mut has_emitted_video_access_unit = false;
-    let mut last_video_datagram = std::time::Instant::now();
     let feedback_started_at = tokio::time::Instant::now();
+    let mut last_video_datagram = feedback_started_at.into_std();
     let mut feedback_timer = tokio::time::interval_at(
         feedback_started_at + VIDEO_FEEDBACK_INTERVAL,
         VIDEO_FEEDBACK_INTERVAL,
@@ -198,6 +214,8 @@ pub(super) async fn run_active_control_loop(
     );
     orientation_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut orientation_checks_enabled = true;
+    let mut poll_order = [ReadyLane::Control, ReadyLane::Video, ReadyLane::Feedback];
+    let mut stall_check_deferred = false;
 
     let result = tokio::select! {
         biased;
@@ -208,12 +226,61 @@ pub(super) async fn run_active_control_loop(
             }
         } => Ok(()),
         result = async { 'stream: loop {
-        tokio::select! {
-            biased;
-            datagram = video_udp.recv() => {
+        let work = {
+            use std::task::Poll;
+
+            let command = controls.receive();
+            let datagram = video_udp.recv();
+            tokio::pin!(command, datagram);
+            tokio::select! {
+                biased;
+                () = &mut first_video_frame_deadline, if !has_emitted_video_access_unit => {
+                    break Err(PublicFailure::new(
+                        "video_stream_start_timed_out",
+                        "video_stream",
+                        true,
+                        "The authenticated display stream did not produce a complete video frame in time.",
+                    ));
+                }
+                work = std::future::poll_fn(|cx| {
+                    for (offset, lane) in poll_order.into_iter().enumerate() {
+                        let work = match lane {
+                            ReadyLane::Control => command.as_mut().poll(cx).map(ReadyWork::Control),
+                            ReadyLane::Video => datagram.as_mut().poll(cx).map(ReadyWork::Video),
+                            ReadyLane::Feedback => {
+                                let stalled = !stall_check_deferred
+                                    && has_emitted_video_access_unit
+                                    && video_stream_stalled(last_video_datagram, tokio::time::Instant::now().into_std());
+                                // A slow handler may have left datagrams waiting
+                                // behind an overdue stall check. Read one, then
+                                // give feedback its turn even if that read is slow.
+                                if stalled && let Poll::Ready(datagram) = datagram.as_mut().poll(cx) {
+                                    stall_check_deferred = true;
+                                    poll_order.rotate_left(offset);
+                                    return Poll::Ready(ReadyWork::Video(datagram));
+                                }
+                                feedback_timer.poll_tick(cx).map(|_| {
+                                    stall_check_deferred = false;
+                                    ReadyWork::Feedback { stalled }
+                                })
+                            }
+                        };
+                        if work.is_ready() {
+                            // Start after the winner so each ready lane gets a turn.
+                            poll_order.rotate_left(offset + 1);
+                            return work;
+                        }
+                    }
+                    Poll::Pending
+                }) => work,
+                _ = orientation_timer.tick(), if orientation_checks_enabled => ReadyWork::CheckOrientation,
+            }
+        };
+        match work {
+            ReadyWork::Video(datagram) => {
                 match datagram {
                     Ok(datagram) => {
-                        last_video_datagram = std::time::Instant::now();
+                        last_video_datagram = tokio::time::Instant::now().into_std();
                         feedback.observe_source_port(datagram.source_port);
                         match process_live_video_datagram(
                             datagram.data,
@@ -248,12 +315,12 @@ pub(super) async fn run_active_control_loop(
                     }
                 }
             }
-            _ = feedback_timer.tick() => {
-                let report = feedback.periodic_report(feedback_started_at.elapsed());
-                let now = std::time::Instant::now();
-                if has_emitted_video_access_unit && video_stream_stalled(last_video_datagram, now) {
+            ReadyWork::Feedback { stalled } => {
+                if stalled {
                     break 'stream Err(media_stalled());
                 }
+                let report = feedback.periodic_report(feedback_started_at.elapsed());
+                let now = std::time::Instant::now();
                 let retry = feedback.keyframe_retry(now);
                 for datagram in report.into_iter().chain(retry) {
                     if video_udp.send_to(feedback.peer_port(), datagram).await.is_err() {
@@ -261,16 +328,8 @@ pub(super) async fn run_active_control_loop(
                     }
                 }
             }
-            () = &mut first_video_frame_deadline, if !has_emitted_video_access_unit => {
-                break Err(PublicFailure::new(
-                    "video_stream_start_timed_out",
-                    "video_stream",
-                    true,
-                    "The authenticated display stream did not produce a complete video frame in time.",
-                ));
-            }
-            command = controls.receive() => {
-                let Some(command) = command else {
+            ReadyWork::Control(command) => {
+                let Some(queued) = command else {
                     break Err(PublicFailure::new(
                         "control_channel_closed",
                         "control_stream",
@@ -278,9 +337,17 @@ pub(super) async fn run_active_control_loop(
                         "The native control channel closed unexpectedly.",
                     ));
                 };
-                let trace_label = input_trace_label(&command);
+                let trace_label = queued.enqueued_at.and_then(|enqueued_at| {
+                    let label = input_trace_label(&queued.command)?;
+                    let waited_ms = enqueued_at.elapsed().as_millis();
+                    let _ = writeln!(
+                        std::io::stdout().lock(),
+                        "devicehub.native input_dequeued kind={label} waited_ms={waited_ms}",
+                    );
+                    Some(label)
+                });
                 if let Err(failure) = handle_control_command(
-                        command,
+                        queued.command,
                         &video_udp,
                         feedback.peer_port(),
                         &mut universal_hid,
@@ -296,11 +363,14 @@ pub(super) async fn run_active_control_loop(
                 {
                     break Err(failure);
                 }
-                if let Some(trace_label) = trace_label {
-                    input_trace("delivered", &trace_label);
+                if let Some(label) = trace_label {
+                    let _ = writeln!(
+                        std::io::stdout().lock(),
+                        "devicehub.native input_delivered kind={label}",
+                    );
                 }
             }
-            _ = orientation_timer.tick(), if orientation_checks_enabled => {
+            ReadyWork::CheckOrientation => {
                 // A failed check keeps the last orientation. Replies are not
                 // matched to requests, so the late answer to a timed-out check
                 // would be read as the answer to the next one: stop checking.
@@ -362,13 +432,6 @@ pub(super) fn input_trace_label(command: &ControlCommand) -> Option<String> {
         ControlCommand::Rotate(_) => Some("rotation".into()),
         ControlCommand::ReleaseAllInput => Some("release_all".into()),
         ControlCommand::VideoNegotiation | ControlCommand::VideoControlDatagram(_) => None,
-    }
-}
-
-fn input_trace(outcome: &str, label: &str) {
-    if std::env::var_os("DEVICE_HUB_BOOTSTRAP_TRACE").as_deref() == Some(std::ffi::OsStr::new("1"))
-    {
-        eprintln!("devicehub.rust input_{outcome} kind={label}");
     }
 }
 
