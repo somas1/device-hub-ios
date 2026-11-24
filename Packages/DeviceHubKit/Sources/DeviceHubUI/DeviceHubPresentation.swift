@@ -154,17 +154,11 @@ extension View {
     /// visionOS has no Liquid Glass `glassEffect`, so it uses the system's
     /// own glass background there.
     @ViewBuilder
-    func deviceHubOverlayGlass(
-        in shape: some InsettableShape,
-        interactive: Bool = false
-    ) -> some View {
+    func deviceHubOverlayGlass(in shape: some InsettableShape) -> some View {
         #if os(visionOS)
             glassBackgroundEffect(in: shape)
         #else
-            glassEffect(
-                interactive ? .regular.interactive() : .regular,
-                in: shape
-            )
+            glassEffect(.regular, in: shape)
         #endif
     }
 

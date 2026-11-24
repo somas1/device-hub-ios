@@ -43,8 +43,10 @@ Native keyboard avoidance and `ArrangementView` placement remain responsible
 for the space.
 
 A translucent black capsule keeps the quick-control icons legible over the
-device image. The More button and device header use system glass. The rest of
-the canvas remains clear.
+device image, and the More button uses the same translucent black in a circle.
+Neither uses glass: on a headset, glass behind More spread over the control
+beside it. The device header uses system glass. The rest of the canvas remains
+clear.
 
 ## Color
 

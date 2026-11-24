@@ -55,7 +55,6 @@ struct RemoteSessionMenu: View, Equatable {
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.85))
             .background(.black.opacity(0.58), in: .circle)
-            .deviceHubOverlayGlass(in: .circle, interactive: true)
     }
 
     private var menu: some View {
