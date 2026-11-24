@@ -23,15 +23,22 @@ struct RemoteSessionMenuEquatableTests {
         #expect(menu() != menu(hidesQuickControlItems: true))
     }
 
-    @Test("More hides the five quick actions while the bar is visible")
+    @Test("More hides quick controls while the bar is visible")
     func quickControlItemsFollowBarVisibility() {
         #expect(menu(hidesQuickControlItems: false).showsQuickControlItems)
         #expect(!menu(hidesQuickControlItems: true).showsQuickControlItems)
     }
 
+    @Test("More includes Clipboard with Home and Lock only when the bar is hidden")
+    func clipboardFollowsBarVisibility() {
+        #expect(menu(hidesQuickControlItems: false).controlItems == [.home, .lock, .clipboard, .keyboard, .rotate])
+        #expect(menu(acceptsInput: false).controlItems.contains(.clipboard))
+        #expect(menu(hidesQuickControlItems: true).controlItems == [.keyboard, .rotate])
+    }
+
     @Test("More keeps Rotate after Keyboard in both layouts")
     func rotateStaysInMore() {
-        #expect(menu(hidesQuickControlItems: false).controlItems == [.home, .lock, .keyboard, .rotate])
+        #expect(menu(hidesQuickControlItems: false).controlItems.suffix(2) == [.keyboard, .rotate])
         #expect(menu(hidesQuickControlItems: true).controlItems == [.keyboard, .rotate])
         #expect(menu(acceptsInput: false, hidesQuickControlItems: true).controlItems == [.keyboard, .rotate])
         #expect(menu(selectedDeviceID: nil).controlItems.isEmpty)
@@ -67,6 +74,7 @@ struct RemoteSessionMenuEquatableTests {
             buttonTapped: { _ in },
             deviceSelected: { _ in },
             detailsButtonTapped: {},
+            keyTapped: { _, _ in },
             keyboardButtonTapped: {},
             pairButtonTapped: {},
             reconnectButtonTapped: {},
