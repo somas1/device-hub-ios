@@ -218,7 +218,7 @@ with clicks and drags, and the remote device's response.
 The session view redraws on every video frame. `RemoteSessionMenuEquatableTests`
 checks that the More menu compares equal when only its closures are new and
 differs when any visible content changes, so SwiftUI does not rebuild an open
-menu between frames. `RemoteSessionFoldedControlsEquatableTests` checks the same
+menu between frames. `FoldedControlsEquatableTests` checks the same
 for the folded controls, which hold the Clipboard menu. Whether an open menu stays steady during live video can
 only be confirmed by hand on a device.
 

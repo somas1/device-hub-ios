@@ -5,7 +5,7 @@ import Testing
 /// equal across those redraws so SwiftUI leaves an open Clipboard menu alone.
 @MainActor
 @Suite("Folded controls identity across redraws")
-struct RemoteSessionFoldedControlsEquatableTests {
+struct FoldedControlsEquatableTests {
     @Test("Fresh closures alone do not make the controls different")
     func sameContentIsEqual() {
         #expect(controls() == controls())
