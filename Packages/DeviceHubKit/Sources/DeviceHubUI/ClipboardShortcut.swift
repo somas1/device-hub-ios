@@ -6,11 +6,19 @@ enum ClipboardShortcut: Character, CaseIterable {
     case copy = "c"
     case paste = "v"
 
-    private var label: (title: LocalizedStringKey, symbol: String) {
+    var title: LocalizedStringKey {
         switch self {
-        case .cut: ("Cut", "scissors")
-        case .copy: ("Copy", "doc.on.doc")
-        case .paste: ("Paste", "doc.on.clipboard")
+        case .cut: "Cut"
+        case .copy: "Copy"
+        case .paste: "Paste"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .cut: "scissors"
+        case .copy: "doc.on.doc"
+        case .paste: "doc.on.clipboard"
         }
     }
 
@@ -21,8 +29,7 @@ enum ClipboardShortcut: Character, CaseIterable {
     @MainActor
     static func menuItems(keyTapped: @escaping (DeviceKey, KeyModifiers) -> Void) -> some View {
         ForEach(allCases, id: \.self) { shortcut in
-            let label = shortcut.label
-            Button(label.title, systemImage: label.symbol) {
+            Button(shortcut.title, systemImage: shortcut.symbol) {
                 shortcut.tap(using: keyTapped)
             }
         }

@@ -18,14 +18,11 @@ struct RemoteSessionQuickControls: View, Equatable {
             button("Volume Up", symbol: "speaker.plus") { buttonTapped(.volumeUp) }
             button("Volume Down", symbol: "speaker.minus") { buttonTapped(.volumeDown) }
             button("Mute", symbol: "speaker.slash") { buttonTapped(.mute) }
-            Menu {
-                ClipboardShortcut.menuItems(keyTapped: keyTapped)
-            } label: {
-                icon("doc.on.clipboard")
+            // Plain buttons, not a menu: on a headset an open menu here does
+            // not stay usable while video is live.
+            ForEach(ClipboardShortcut.allCases, id: \.self) { shortcut in
+                button(shortcut.title, symbol: shortcut.symbol) { shortcut.tap(using: keyTapped) }
             }
-            .menuIndicator(.hidden)
-            .accessibilityLabel("Clipboard")
-            .accessibilityHint(inputHint)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white.opacity(acceptsInput ? 0.85 : 0.4))
@@ -35,20 +32,12 @@ struct RemoteSessionQuickControls: View, Equatable {
 
     private func button(_ title: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            icon(symbol)
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
         }
         .accessibilityLabel(Text(title))
-        .accessibilityHint(inputHint)
-    }
-
-    private func icon(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 14, weight: .medium))
-            .frame(width: 44, height: 44)
-            .contentShape(.rect)
-    }
-
-    private var inputHint: Text {
-        acceptsInput ? Text("") : Text("Available when the remote screen is live.")
+        .accessibilityHint(acceptsInput ? Text("") : Text("Available when the remote screen is live."))
     }
 }

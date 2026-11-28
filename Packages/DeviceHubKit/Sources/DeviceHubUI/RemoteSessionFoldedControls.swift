@@ -14,7 +14,7 @@ import SwiftUI
         var body: some View {
             ZStack {
                 if showsDirectControls {
-                    controls
+                    controls.equatable()
                 }
 
                 Color.clear
@@ -31,7 +31,7 @@ import SwiftUI
 
 /// Shares the remote session's existing commands and keyboard intent. It owns
 /// no connection, responder, input transform, or copy of the selected device.
-struct RemoteSessionFoldedControls: View {
+struct RemoteSessionFoldedControls: View, Equatable {
     let acceptsInput: Bool
     let isKeyboardPresented: Bool
     let home: () -> Void
@@ -39,6 +39,14 @@ struct RemoteSessionFoldedControls: View {
     let keyTapped: (DeviceKey, KeyModifiers) -> Void
     let keyboard: () -> Void
     let rotate: () -> Void
+
+    /// Compares only what the controls show. The parent redraws on every video
+    /// frame with fresh closures; treating those as changes would rebuild the
+    /// Clipboard menu while it is open.
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.acceptsInput == rhs.acceptsInput
+            && lhs.isKeyboardPresented == rhs.isKeyboardPresented
+    }
 
     var body: some View {
         VStack(spacing: 20) {

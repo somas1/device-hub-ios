@@ -17,7 +17,7 @@ The app hard-targets iOS/iPadOS 27 and uses current SwiftUI directly:
 - transformed `onGeometryChange` values only when layout geometry must enter
   feature state;
 - a 44-point More menu near the top-right corner that includes Rotate, with
-  five quick controls in a capsule beside it at regular width when a device
+  eight quick controls in a capsule beside it at regular width when a device
   is selected;
 - no bottom action bar, trailing control rail, or app-added canvas padding.
 
@@ -43,8 +43,10 @@ Native keyboard avoidance and `ArrangementView` placement remain responsible
 for the space.
 
 A translucent black capsule keeps the quick-control icons legible over the
-device image. The More button and device header use system glass. The rest of
-the canvas remains clear.
+device image, and the More button uses the same translucent black in a circle.
+Neither uses glass: on a headset, glass behind More spread over the control
+beside it. The device header uses system glass. The rest of the canvas remains
+clear.
 
 ## Color
 
